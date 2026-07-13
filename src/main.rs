@@ -45,6 +45,14 @@ struct Args {
     /// Codex data dir (default: ~/.codex/sessions)
     #[arg(long)]
     codex_dir: Option<PathBuf>,
+
+    /// Scan cache path (default: ~/Library/Caches/brrrn/scan-v2.json)
+    #[arg(long)]
+    cache: Option<PathBuf>,
+
+    /// Rescan every session file and do not read or write the scan cache
+    #[arg(long)]
+    no_cache: bool,
 }
 
 fn home() -> PathBuf {
@@ -117,8 +125,21 @@ fn main() {
     let claude_dir = args.claude_dir.unwrap_or_else(|| home().join(".claude/projects"));
     let codex_dir = args.codex_dir.unwrap_or_else(|| home().join(".codex/sessions"));
 
+    let cache_path = if args.no_cache {
+        None
+    } else {
+        Some(args.cache.unwrap_or_else(|| home().join("Library/Caches/brrrn/scan-v2.json")))
+    };
+
     let started = std::time::Instant::now();
-    let (agg, stats) = scan::scan_all(&claude_dir, &codex_dir, &pricing, min_date, utc);
+    let (agg, stats) = scan::scan_all(
+        &claude_dir,
+        &codex_dir,
+        &pricing,
+        min_date,
+        utc,
+        cache_path.as_deref(),
+    );
 
     if args.json {
         report::print_json(&agg, &args.period, today, utc);
@@ -128,10 +149,15 @@ fn main() {
             report::print_daily(&agg, today);
         }
         eprintln!(
-            "\nscanned {} files / {} records in {:.1}s",
+            "\n{} files ({} cached, {} scanned) / {} records in {:.2}s",
+            stats.files_total,
+            stats.files_cached,
             stats.files_scanned,
-            agg.records,
+            stats.records,
             started.elapsed().as_secs_f64()
         );
+        if let Some(e) = stats.cache_error {
+            eprintln!("warning: could not save scan cache: {e}");
+        }
     }
 }

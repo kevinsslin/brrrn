@@ -5,12 +5,17 @@ use chrono::{DateTime, Local, NaiveDate, Utc};
 use walkdir::WalkDir;
 
 use crate::agg::{Agg, Entry};
+use crate::cache::ScanCache;
 use crate::pricing::Pricing;
 use crate::{claude, codex};
 
 #[derive(Default)]
 pub struct ScanStats {
+    pub files_total: u64,
     pub files_scanned: u64,
+    pub files_cached: u64,
+    pub records: u64,
+    pub cache_error: Option<String>,
 }
 
 /// Skip whole files last written before the cutoff: no record inside can be newer.
@@ -37,7 +42,7 @@ pub fn add_entries(agg: &mut Agg, entries: &[Entry], pricing: &Pricing, min_date
 }
 
 fn jsonl_files(dir: &Path, min_date: Option<NaiveDate>, utc: bool) -> Vec<std::path::PathBuf> {
-    WalkDir::new(dir)
+    let mut files: Vec<_> = WalkDir::new(dir)
         .into_iter()
         .filter_map(|e| e.ok())
         .filter(|e| {
@@ -46,7 +51,9 @@ fn jsonl_files(dir: &Path, min_date: Option<NaiveDate>, utc: bool) -> Vec<std::p
                 && !skip_by_mtime(e.path(), min_date, utc)
         })
         .map(|e| e.into_path())
-        .collect()
+        .collect();
+    files.sort();
+    files
 }
 
 pub fn scan_all(
@@ -55,24 +62,63 @@ pub fn scan_all(
     pricing: &Pricing,
     min_date: Option<NaiveDate>,
     utc: bool,
+    cache_path: Option<&Path>,
 ) -> (Agg, ScanStats) {
     let mut agg = Agg::default();
     let mut stats = ScanStats::default();
+    let mut cache = cache_path.map(|p| ScanCache::load(p, utc));
 
     if claude_dir.exists() {
         let mut seen: HashSet<u64> = HashSet::new();
         for path in jsonl_files(claude_dir, None, utc) {
-            stats.files_scanned += 1;
-            let (entries, _) = claude::scan_file(&path, &mut seen, utc);
+            stats.files_total += 1;
+            let cached = cache.as_mut().and_then(|c| c.take_if_fresh(&path, &mut seen));
+            let (entries, records) = match cached {
+                Some((entries, records)) => {
+                    stats.files_cached += 1;
+                    (entries, records)
+                }
+                None => {
+                    stats.files_scanned += 1;
+                    let (entries, claims) = claude::scan_file(&path, &mut seen, utc);
+                    let records = entries.len() as u64;
+                    if let Some(c) = cache.as_mut() {
+                        c.store(&path, &entries, &claims);
+                    }
+                    (entries, records)
+                }
+            };
+            stats.records += records;
             add_entries(&mut agg, &entries, pricing, min_date);
         }
     }
     if codex_dir.exists() {
         let mut seen: HashSet<u64> = HashSet::new();
         for path in jsonl_files(codex_dir, None, utc) {
-            stats.files_scanned += 1;
-            let (entries, _) = codex::scan_file(&path, &mut seen, utc);
+            stats.files_total += 1;
+            let cached = cache.as_mut().and_then(|c| c.take_if_fresh(&path, &mut seen));
+            let (entries, records) = match cached {
+                Some((entries, records)) => {
+                    stats.files_cached += 1;
+                    (entries, records)
+                }
+                None => {
+                    stats.files_scanned += 1;
+                    let (entries, claims) = codex::scan_file(&path, &mut seen, utc);
+                    let records = entries.len() as u64;
+                    if let Some(c) = cache.as_mut() {
+                        c.store(&path, &entries, &claims);
+                    }
+                    (entries, records)
+                }
+            };
+            stats.records += records;
             add_entries(&mut agg, &entries, pricing, min_date);
+        }
+    }
+    if let Some(c) = cache {
+        if let Err(e) = c.save() {
+            stats.cache_error = Some(e.to_string());
         }
     }
     (agg, stats)

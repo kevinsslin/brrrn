@@ -150,9 +150,9 @@ fn source_json(agg: &Agg, src: Source, today: NaiveDate) -> serde_json::Value {
 }
 
 /// Machine-readable output. This schema is frozen: the menu bar app decodes it.
-pub fn print_json(agg: &Agg, period: &str, today: NaiveDate, utc: bool) {
+pub fn json_value(agg: &Agg, period: &str, today: NaiveDate, utc: bool) -> serde_json::Value {
     let first = agg.daily.keys().next().copied().unwrap_or(today);
-    let by_model: Vec<_> = agg
+    let mut by_model: Vec<_> = agg
         .by_key
         .iter()
         .map(|(k, (u, cost))| {
@@ -170,6 +170,15 @@ pub fn print_json(agg: &Agg, period: &str, today: NaiveDate, utc: bool) {
             })
         })
         .collect();
+    by_model.sort_by(|a, b| {
+        let ac = a["cost_usd"].as_f64().unwrap_or(-1.0);
+        let bc = b["cost_usd"].as_f64().unwrap_or(-1.0);
+        bc.partial_cmp(&ac)
+            .unwrap()
+            .then_with(|| a["source"].as_str().cmp(&b["source"].as_str()))
+            .then_with(|| a["model"].as_str().cmp(&b["model"].as_str()))
+            .then_with(|| a["speed"].as_str().cmp(&b["speed"].as_str()))
+    });
     let daily: Vec<_> = agg
         .daily
         .iter()
@@ -181,7 +190,7 @@ pub fn print_json(agg: &Agg, period: &str, today: NaiveDate, utc: bool) {
             })
         })
         .collect();
-    let out = serde_json::json!({
+    serde_json::json!({
         "period": period,
         "tz": if utc { "utc" } else { "local" },
         "generated_on": today.to_string(),
@@ -201,8 +210,11 @@ pub fn print_json(agg: &Agg, period: &str, today: NaiveDate, utc: bool) {
         },
         "by_model": by_model,
         "daily": daily,
-    });
-    println!("{}", serde_json::to_string_pretty(&out).unwrap());
+    })
+}
+
+pub fn print_json(agg: &Agg, period: &str, today: NaiveDate, utc: bool) {
+    println!("{}", serde_json::to_string_pretty(&json_value(agg, period, today, utc)).unwrap());
 }
 
 #[cfg(test)]
@@ -224,5 +236,29 @@ mod tests {
         assert_eq!(fmt_tokens(1_000), "1.0K");
         assert_eq!(fmt_tokens(1_500_000), "1.5M");
         assert_eq!(fmt_tokens(2_100_000_000), "2.10B");
+    }
+
+    #[test]
+    fn json_models_are_deterministically_sorted_by_cost() {
+        use crate::agg::{Entry, Usage};
+        use crate::pricing::Price;
+
+        let mut agg = Agg::default();
+        let date: NaiveDate = "2026-07-13".parse().unwrap();
+        for (model, input) in [("cheap", 1), ("expensive", 10)] {
+            agg.add_entry(
+                &Entry {
+                    date,
+                    source: Source::Claude,
+                    model: model.into(),
+                    speed: "standard".into(),
+                    usage: Usage { input, ..Default::default() },
+                },
+                Some(Price { input: 1.0, output: 1.0, cache_read: 1.0, cache_w5m: 1.0, cache_w1h: 1.0 }),
+            );
+        }
+        let v = json_value(&agg, "all", date, true);
+        assert_eq!(v["by_model"][0]["model"], "expensive");
+        assert_eq!(v["by_model"][1]["model"], "cheap");
     }
 }

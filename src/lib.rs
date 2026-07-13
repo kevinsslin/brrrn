@@ -1,4 +1,5 @@
 pub mod agg;
+pub mod cache;
 pub mod claude;
 pub mod codex;
 pub mod pricing;
