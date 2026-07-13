@@ -57,14 +57,16 @@ final class BrrrnCoreTests: XCTestCase {
     }
 
     func testBinaryLookupOrderAndOverride() {
-        let existing = Set(["/custom/brrrn", "/opt/homebrew/bin/brrrn"])
+        let existing = Set(["/custom/brrrn", "/Applications/BrrrnBar.app/Contents/MacOS/brrrn"])
         let locator = BinaryLocator(
             environment: ["BRRRN_BIN": "/custom/brrrn"],
             homeDirectory: "/Users/test",
+            executablePath: "/Applications/BrrrnBar.app/Contents/MacOS/BrrrnBar",
             fileExists: { existing.contains($0) }
         )
         XCTAssertEqual(locator.candidates(), [
             "/custom/brrrn",
+            "/Applications/BrrrnBar.app/Contents/MacOS/brrrn",
             "/opt/homebrew/bin/brrrn",
             "/usr/local/bin/brrrn",
             "/Users/test/repos/kevin-dev/brrrn/target/release/brrrn",
@@ -96,6 +98,14 @@ final class BrrrnCoreTests: XCTestCase {
         XCTAssertEqual(config.hubURL, "https://hub.example")
         XCTAssertEqual(config.handle, "kevin")
         XCTAssertEqual(config.pits, ["one", "two"])
+    }
+
+    func testConfigPathEnvironmentOverride() {
+        let url = BrrrnConfig.defaultURL(
+            homeDirectory: "/Users/test",
+            environment: ["BRRRN_CONFIG": "/tmp/custom-brrrn.json"]
+        )
+        XCTAssertEqual(url.path, "/tmp/custom-brrrn.json")
     }
 
     private func model(_ name: String, cost: Double?, tokens: Int) -> BurnReport.ModelUsage {

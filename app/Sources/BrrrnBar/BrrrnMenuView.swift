@@ -384,7 +384,8 @@ private struct MemberDetailView: View {
                             )
                             .foregroundStyle(BrrrnPalette.chart(colorScheme))
                             .cornerRadius(4)
-                            if let hoveredDate, Calendar.current.isDate(point.date, inSameDayAs: hoveredDate) {
+                            if let hoveredDate,
+                               BurnReport.DailyEntry.utcCalendar.isDate(point.date, inSameDayAs: hoveredDate) {
                                 RuleMark(x: .value("Selected", point.date, unit: .day))
                                     .foregroundStyle(.secondary.opacity(0.45))
                             }
@@ -412,8 +413,10 @@ private struct MemberDetailView: View {
                                     .onContinuousHover { phase in
                                         switch phase {
                                         case .active(let location):
-                                            let plotX = location.x - geometry[proxy.plotFrame!].origin.x
-                                            hoveredDate = proxy.value(atX: plotX, as: Date.self)
+                                            if let plotFrame = proxy.plotFrame {
+                                                let plotX = location.x - geometry[plotFrame].origin.x
+                                                hoveredDate = proxy.value(atX: plotX, as: Date.self)
+                                            }
                                         case .ended:
                                             hoveredDate = nil
                                         }

@@ -63,10 +63,19 @@ impl Pricing {
                 .unwrap_or(input * 2.0);
             map.insert(
                 name.clone(),
-                Price { input, output, cache_read, cache_w5m, cache_w1h },
+                Price {
+                    input,
+                    output,
+                    cache_read,
+                    cache_w5m,
+                    cache_w1h,
+                },
             );
         }
-        Ok(Self { map, resolved: RefCell::new(HashMap::new()) })
+        Ok(Self {
+            map,
+            resolved: RefCell::new(HashMap::new()),
+        })
     }
 
     /// Resolve a model name as logged by the CLI to a price entry.

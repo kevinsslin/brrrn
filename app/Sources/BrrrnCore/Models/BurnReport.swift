@@ -189,7 +189,7 @@ public struct BurnReport: Codable, Sendable, Equatable {
             return Self.utcCalendar.date(from: components)
         }
 
-        static var utcCalendar: Calendar {
+        public static var utcCalendar: Calendar {
             var calendar = Calendar(identifier: .gregorian)
             calendar.timeZone = TimeZone(identifier: "UTC") ?? .gmt
             return calendar

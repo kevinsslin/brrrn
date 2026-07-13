@@ -62,7 +62,14 @@ impl Usage {
     }
 
     pub fn to_array(&self) -> [u64; 6] {
-        [self.input, self.cache_read, self.cache_w5m, self.cache_w1h, self.output, self.reasoning]
+        [
+            self.input,
+            self.cache_read,
+            self.cache_w5m,
+            self.cache_w1h,
+            self.output,
+            self.reasoning,
+        ]
     }
 
     pub fn from_array(a: [u64; 6]) -> Usage {
@@ -138,7 +145,11 @@ impl Agg {
         self.records += 1;
         let cost = price.map(|p| p.cost(&e.usage));
 
-        let key = Key { source: e.source, model: e.model.clone(), speed: e.speed.clone() };
+        let key = Key {
+            source: e.source,
+            model: e.model.clone(),
+            speed: e.speed.clone(),
+        };
         let slot = self
             .by_key
             .entry(key)
@@ -148,7 +159,12 @@ impl Agg {
             *total += c;
         }
 
-        let day = self.daily.entry(e.date).or_default().entry(e.source).or_default();
+        let day = self
+            .daily
+            .entry(e.date)
+            .or_default()
+            .entry(e.source)
+            .or_default();
         day.tokens += e.usage.total();
         match cost {
             Some(c) => day.cost += c,
@@ -193,12 +209,29 @@ mod tests {
     #[test]
     fn add_entry_rolls_up_key_day_and_model() {
         let mut agg = Agg::default();
-        let p = Price { input: 1e-6, output: 5e-6, cache_read: 1e-7, cache_w5m: 1.25e-6, cache_w1h: 2e-6 };
-        let u = Usage { input: 1000, cache_read: 2000, cache_w5m: 0, cache_w1h: 0, output: 100, reasoning: 0 };
+        let p = Price {
+            input: 1e-6,
+            output: 5e-6,
+            cache_read: 1e-7,
+            cache_w5m: 1.25e-6,
+            cache_w1h: 2e-6,
+        };
+        let u = Usage {
+            input: 1000,
+            cache_read: 2000,
+            cache_w5m: 0,
+            cache_w1h: 0,
+            output: 100,
+            reasoning: 0,
+        };
         agg.add_entry(&entry("2026-07-13", "m", u), Some(p));
         agg.add_entry(&entry("2026-07-13", "m", u), Some(p));
 
-        let key = Key { source: Source::Claude, model: "m".into(), speed: "standard".into() };
+        let key = Key {
+            source: Source::Claude,
+            model: "m".into(),
+            speed: "standard".into(),
+        };
         let (total, cost) = &agg.by_key[&key];
         assert_eq!(total.input, 2000);
         let expected = 2.0 * (1000.0 * 1e-6 + 2000.0 * 1e-7 + 100.0 * 5e-6);
@@ -213,12 +246,20 @@ mod tests {
     #[test]
     fn unpriced_entries_tracked_separately() {
         let mut agg = Agg::default();
-        let u = Usage { input: 10, output: 5, ..Default::default() };
+        let u = Usage {
+            input: 10,
+            output: 5,
+            ..Default::default()
+        };
         agg.add_entry(&entry("2026-07-13", "mystery", u), None);
         let day = &agg.daily[&"2026-07-13".parse().unwrap()][&Source::Claude];
         assert_eq!(day.unpriced_tokens, 15);
         assert_eq!(day.cost, 0.0);
-        let key = Key { source: Source::Claude, model: "mystery".into(), speed: "standard".into() };
+        let key = Key {
+            source: Source::Claude,
+            model: "mystery".into(),
+            speed: "standard".into(),
+        };
         assert!(agg.by_key[&key].1.is_none());
     }
 }

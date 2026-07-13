@@ -28,7 +28,13 @@ export const WORDS = [
   'silver', 'sky', 'slate', 'smoke', 'snow', 'solar', 'spark', 'spruce', 'star', 'stone',
 ];
 
-export function generateJoinCode(rng = Math.random) {
+function secureRandom() {
+  const value = new Uint32Array(1);
+  crypto.getRandomValues(value);
+  return value[0] / 0x1_0000_0000;
+}
+
+export function generateJoinCode(rng = secureRandom) {
   const pick = (pool) => pool[Math.floor(rng() * pool.length)];
   let suffix = '';
   for (let i = 0; i < 4; i++) suffix += pick(CODE_CHARS);
@@ -84,6 +90,10 @@ function finiteNonNeg(v) {
   return typeof v === 'number' && Number.isFinite(v) && v >= 0;
 }
 
+function nonNegInteger(v) {
+  return Number.isSafeInteger(v) && v >= 0;
+}
+
 function optionalUsd(v) {
   return v === undefined ? 0 : v;
 }
@@ -108,7 +118,7 @@ export function validateDays(days) {
     const cost = d.cost_usd;
     const claude = optionalUsd(d.claude_usd);
     const codex = optionalUsd(d.codex_usd);
-    if (![tokens, cost, claude, codex].every(finiteNonNeg)) {
+    if (!nonNegInteger(tokens) || ![cost, claude, codex].every(finiteNonNeg)) {
       return { ok: false, error: `invalid numbers for ${d.date}` };
     }
     const models = {};
@@ -127,7 +137,8 @@ export function validateDays(days) {
         const m = d.models[name];
         if (
           typeof m !== 'object' || m === null ||
-          ![m.input_tokens, m.output_tokens, m.cost_usd].every(finiteNonNeg)
+          !nonNegInteger(m.input_tokens) || !nonNegInteger(m.output_tokens) ||
+          !finiteNonNeg(m.cost_usd)
         ) {
           return { ok: false, error: `invalid model entry ${name} for ${d.date}` };
         }

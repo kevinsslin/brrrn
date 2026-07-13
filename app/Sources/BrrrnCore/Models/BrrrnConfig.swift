@@ -44,9 +44,16 @@ public struct BrrrnConfig: Codable, Sendable, Equatable {
         try JSONDecoder().decode(BrrrnConfig.self, from: data)
     }
 
-    /// Default location: ~/.config/brrrn/config.json
-    public static func defaultURL(homeDirectory: String = NSHomeDirectory()) -> URL {
-        URL(fileURLWithPath: homeDirectory)
+    /// Default location: ~/.config/brrrn/config.json. BRRRN_CONFIG is a
+    /// development/testing override and mirrors BRRRN_BIN.
+    public static func defaultURL(
+        homeDirectory: String = NSHomeDirectory(),
+        environment: [String: String] = ProcessInfo.processInfo.environment
+    ) -> URL {
+        if let override = environment["BRRRN_CONFIG"], !override.isEmpty {
+            return URL(fileURLWithPath: override)
+        }
+        return URL(fileURLWithPath: homeDirectory)
             .appendingPathComponent(".config/brrrn/config.json")
     }
 

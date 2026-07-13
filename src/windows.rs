@@ -19,7 +19,11 @@ pub fn month_start(d: NaiveDate) -> NaiveDate {
 /// day is not over); it just doesn't count yet.
 pub fn streak_days(daily_cost: &BTreeMap<NaiveDate, f64>, today: NaiveDate, threshold: f64) -> u32 {
     let at = |d: NaiveDate| daily_cost.get(&d).copied().unwrap_or(0.0) >= threshold;
-    let mut d = if at(today) { today } else { today.pred_opt().expect("date range") };
+    let mut d = if at(today) {
+        today
+    } else {
+        today.pred_opt().expect("date range")
+    };
     let mut n = 0;
     while at(d) {
         n += 1;
@@ -96,7 +100,10 @@ mod tests {
     #[test]
     fn parse_date_utc_vs_boundary() {
         // 23:30 UTC stays on the 13th in UTC regardless of local zone.
-        assert_eq!(parse_date(Some("2026-07-13T23:30:00.000Z"), true), Some(d("2026-07-13")));
+        assert_eq!(
+            parse_date(Some("2026-07-13T23:30:00.000Z"), true),
+            Some(d("2026-07-13"))
+        );
         assert_eq!(parse_date(Some("not a date"), true), None);
         assert_eq!(parse_date(None, true), None);
     }

@@ -1,6 +1,6 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import worker from '../src/worker.js';
+import worker, { Coordinator } from '../src/worker.js';
 
 // Map-backed mock of the Workers KV binding, matching the return shapes of
 // get / put / list({prefix}).
@@ -37,7 +37,18 @@ class MockKV {
 const NOW = '2026-01-07T12:00:00Z';
 
 function makeEnv() {
-  return { BRRRN_KV: new MockKV(), __TEST_NOW: NOW };
+  const env = { BRRRN_KV: new MockKV(), __TEST_NOW: NOW };
+  let coordinator;
+  env.COORDINATOR = {
+    idFromName: (name) => name,
+    get: () => ({
+      fetch: (request) => {
+        coordinator ??= new Coordinator({}, env);
+        return coordinator.fetch(request);
+      },
+    }),
+  };
+  return env;
 }
 
 async function call(env, method, path, body, headers = {}) {
@@ -194,6 +205,39 @@ test('join: unknown pit is 404, duplicate handle is 409, bad handle is 400', asy
   assert.equal((await join(env, code, 'x'.repeat(25), 's')).status, 400);
 });
 
+test('coordinator serializes concurrent claims for the same handle', async () => {
+  const env = makeEnv();
+  const code = await createPit(env);
+  const results = await Promise.all([
+    join(env, code, 'alice', 'secret-a'),
+    join(env, code, 'alice', 'secret-b'),
+  ]);
+  assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+});
+
+test('concurrent submissions for different dates do not overwrite each other', async () => {
+  const env = makeEnv();
+  const code = await createPit(env);
+  await join(env, code, 'alice', 's');
+  const base = { handle: 'alice', secret: 's', machine_id: 'm1' };
+  const results = await Promise.all([
+    call(env, 'POST', `/pit/${code}/submit`, {
+      ...base,
+      days: [{ date: '2026-01-06', tokens: 10, cost_usd: 6 }],
+    }),
+    call(env, 'POST', `/pit/${code}/submit`, {
+      ...base,
+      days: [{ date: '2026-01-07', tokens: 20, cost_usd: 7 }],
+    }),
+  ]);
+  assert.ok(results.every((r) => r.status === 200));
+  const member = await call(env, 'GET', `/pit/${code}/member/alice`);
+  assert.deepEqual(member.data.days, [
+    { date: '2026-01-06', tokens: 10, cost_usd: 6 },
+    { date: '2026-01-07', tokens: 20, cost_usd: 7 },
+  ]);
+});
+
 test('submit: wrong secret is 401, unknown pit and member are 404', async () => {
   const env = makeEnv();
   const code = await createPit(env);
@@ -256,6 +300,17 @@ test('join is rate limited to 10 per IP per minute', async () => {
   // A different IP is not affected.
   const other = await call(env, 'POST', `/pit/${code}/join`, { handle: 'user10', secret: 's' }, { 'cf-connecting-ip': '203.0.113.8' });
   assert.equal(other.status, 200);
+});
+
+test('coordinator enforces join limit under concurrency', async () => {
+  const env = makeEnv();
+  const code = await createPit(env);
+  const ip = { 'cf-connecting-ip': '203.0.113.90' };
+  const results = await Promise.all(Array.from({ length: 11 }, (_, i) =>
+    call(env, 'POST', `/pit/${code}/join`, { handle: `burst${i}`, secret: 's' }, ip)
+  ));
+  assert.equal(results.filter((r) => r.status === 200).length, 10);
+  assert.equal(results.filter((r) => r.status === 429).length, 1);
 });
 
 test('member endpoint 404s for unknown pit or handle', async () => {

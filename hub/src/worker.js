@@ -2,7 +2,6 @@ import {
   aggregateMember,
   generateJoinCode,
   memberSeries,
-  mergeDayRecords,
   normalizeHandle,
   validateDays,
 } from './logic.js';
@@ -145,17 +144,21 @@ async function submitDays(request, env, code) {
   const checked = validateDays(body.days);
   if (!checked.ok) return error(checked.error);
 
-  const key = `days:${code}:${auth.handle}:${body.machine_id}`;
-  const existing = await env.BRRRN_KV.get(key, 'json') || {};
-  const merged = mergeDayRecords(existing, checked.days);
-  await env.BRRRN_KV.put(key, JSON.stringify(merged));
+  await Promise.all(checked.days.map(({ date, rec }) => {
+    const key = `day:${code}:${auth.handle}:${body.machine_id}:${date}`;
+    return env.BRRRN_KV.put(key, JSON.stringify(rec));
+  }));
   return json({ ok: true, days_stored: checked.days.length });
 }
 
-async function machineRecords(env, prefix) {
+async function dailyRecords(env, prefix) {
   const keys = await listKeys(env.BRRRN_KV, prefix);
-  const records = await Promise.all(keys.map((key) => env.BRRRN_KV.get(key, 'json')));
-  return records.filter(Boolean);
+  const values = await Promise.all(keys.map((key) => env.BRRRN_KV.get(key, 'json')));
+  return values.flatMap((rec, index) => {
+    if (!rec) return [];
+    const date = keys[index].slice(keys[index].lastIndexOf(':') + 1);
+    return [{ [date]: rec }];
+  });
 }
 
 async function getBoard(env, code, now) {
@@ -164,7 +167,7 @@ async function getBoard(env, code, now) {
   const memberKeys = await listKeys(env.BRRRN_KV, `member:${code}:`);
   const members = await Promise.all(memberKeys.map(async (key) => {
     const handle = key.slice(`member:${code}:`.length);
-    const records = await machineRecords(env, `days:${code}:${handle}:`);
+    const records = await dailyRecords(env, `day:${code}:${handle}:`);
     return { handle, ...aggregateMember(records, now) };
   }));
   members.sort((a, b) => b.today_usd - a.today_usd || a.handle.localeCompare(b.handle));
@@ -177,8 +180,47 @@ async function getMember(env, code, handleValue) {
   if (!handle || !(await env.BRRRN_KV.get(`member:${code}:${handle}`))) {
     return error('member not found', 404, true);
   }
-  const records = await machineRecords(env, `days:${code}:${handle}:`);
+  const records = await dailyRecords(env, `day:${code}:${handle}:`);
   return json({ handle, days: memberSeries(records) }, 200, true);
+}
+
+async function coordinatedRoute(request, env) {
+  const url = new URL(request.url);
+  const path = url.pathname;
+  const now = new Date(env.__TEST_NOW || Date.now());
+
+  let match = path.match(/^\/pit\/([^/]+)\/join$/);
+  if (request.method === 'POST' && match) return joinPit(request, env, match[1], now);
+
+  match = path.match(/^\/pit\/([^/]+)\/submit$/);
+  if (request.method === 'POST' && match) return submitDays(request, env, match[1]);
+
+  return error('not found', 404);
+}
+
+export class Coordinator {
+  constructor(_ctx, env) {
+    this.env = env;
+    this.tail = Promise.resolve();
+  }
+
+  async fetch(request) {
+    let release;
+    const previous = this.tail;
+    this.tail = new Promise((resolve) => { release = resolve; });
+    await previous;
+    try {
+      return await coordinatedRoute(request, this.env);
+    } finally {
+      release();
+    }
+  }
+}
+
+function coordinatedFetch(request, env) {
+  if (!env.COORDINATOR) return coordinatedRoute(request, env);
+  const id = env.COORDINATOR.idFromName('global');
+  return env.COORDINATOR.get(id).fetch(request);
 }
 
 async function route(request, env) {
@@ -193,11 +235,8 @@ async function route(request, env) {
     return createPit(request, env, now);
   }
 
-  let match = path.match(/^\/pit\/([^/]+)\/join$/);
-  if (request.method === 'POST' && match) return joinPit(request, env, match[1], now);
-
-  match = path.match(/^\/pit\/([^/]+)\/submit$/);
-  if (request.method === 'POST' && match) return submitDays(request, env, match[1]);
+  let match = path.match(/^\/pit\/([^/]+)\/(join|submit)$/);
+  if (request.method === 'POST' && match) return coordinatedFetch(request, env);
 
   match = path.match(/^\/pit\/([^/]+)\/board$/);
   if (request.method === 'GET' && match) return getBoard(env, match[1], now);

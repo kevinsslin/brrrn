@@ -93,6 +93,9 @@ final class AppModel: ObservableObject {
         let pitIsDue = forcePit || lastPitRefresh.map { Date().timeIntervalSince($0) >= 300 } ?? true
         if pitIsDue, let config, config.hasPits {
             do {
+                // The menu app is the background sync loop: local aggregates
+                // go up first, then the refreshed friend board comes down.
+                try await LocalEngine.submit(binary: binary)
                 boards = try await pitClient.boards(config: config)
                 lastPitRefresh = Date()
             } catch {

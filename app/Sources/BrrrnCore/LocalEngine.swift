@@ -42,6 +42,11 @@ public enum LocalEngine {
         return try JSONDecoder().decode(BurnReport.self, from: data)
     }
 
+    /// Pushes today/yesterday (or the initial full backfill) to configured pits.
+    public static func submit(binary: String) async throws {
+        _ = try await run(binary: binary, arguments: ["submit"])
+    }
+
     private static func run(binary: String, arguments: [String]) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

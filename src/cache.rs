@@ -7,7 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::agg::{Entry, Source, Usage};
 
-const CACHE_VERSION: u32 = 2;
+const CACHE_VERSION: u32 = 4;
+
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Fingerprint {
+    size: u64,
+    mtime_ns: u128,
+}
 
 #[derive(Serialize, Deserialize, Default)]
 struct CacheFile {
@@ -22,6 +28,7 @@ pub struct CachedFile {
     mtime_ns: u128,
     records: u64,
     claims: Vec<u64>,
+    dependencies: Vec<u64>,
     entries: Vec<CachedEntry>,
 }
 
@@ -50,46 +57,78 @@ impl ScanCache {
             .filter(|c| c.version == CACHE_VERSION && c.timezone == timezone)
             .map(|c| c.files)
             .unwrap_or_default();
-        Self { path: path.to_path_buf(), timezone, files, touched: HashSet::new() }
+        Self {
+            path: path.to_path_buf(),
+            timezone,
+            files,
+            touched: HashSet::new(),
+        }
     }
 
-    /// Return cached contributions only if the file fingerprint matches and
-    /// none of its formerly claimed dedup hashes were claimed earlier in this
-    /// traversal. A collision forces a rescan so contributions can be filtered
-    /// at message granularity.
+    /// Return cached contributions only if the file fingerprint and dedup
+    /// dependencies still match this traversal. A new earlier claim, or a
+    /// missing file that used to own a duplicate, forces a message-level rescan.
     pub fn take_if_fresh(
         &mut self,
         path: &Path,
         seen: &mut HashSet<u64>,
     ) -> Option<(Vec<Entry>, u64)> {
         let key = path.to_string_lossy().into_owned();
-        let (size, mtime_ns) = fingerprint(path)?;
+        let current = fingerprint(path)?;
         let cached = self.files.get(&key)?;
-        if cached.size != size || cached.mtime_ns != mtime_ns {
+        if cached.size != current.size || cached.mtime_ns != current.mtime_ns {
             return None;
         }
-        if cached.claims.iter().any(|h| seen.contains(h)) {
+        if cached.claims.iter().any(|h| seen.contains(h))
+            || cached.dependencies.iter().any(|h| !seen.contains(h))
+        {
             return None;
         }
-        let entries: Option<Vec<Entry>> = cached.entries.iter().map(CachedEntry::to_entry).collect();
+        let entries: Option<Vec<Entry>> =
+            cached.entries.iter().map(CachedEntry::to_entry).collect();
         let entries = entries?;
         seen.extend(cached.claims.iter().copied());
         self.touched.insert(key);
         Some((entries, cached.records))
     }
 
-    pub fn store(&mut self, path: &Path, entries: &[Entry], claims: &[u64]) {
-        let Some((size, mtime_ns)) = fingerprint(path) else { return };
+    pub fn store_if_unchanged(
+        &mut self,
+        path: &Path,
+        before: Fingerprint,
+        entries: &[Entry],
+        claims: &[u64],
+        dependencies: &[u64],
+    ) -> bool {
+        if fingerprint(path) != Some(before) {
+            return false;
+        }
+        self.store(path, before, entries, claims, dependencies);
+        true
+    }
+
+    fn store(
+        &mut self,
+        path: &Path,
+        fingerprint: Fingerprint,
+        entries: &[Entry],
+        claims: &[u64],
+        dependencies: &[u64],
+    ) {
         let key = path.to_string_lossy().into_owned();
         self.touched.insert(key.clone());
         self.files.insert(
             key,
             CachedFile {
-                size,
-                mtime_ns,
+                size: fingerprint.size,
+                mtime_ns: fingerprint.mtime_ns,
                 records: entries.len() as u64,
                 claims: claims.to_vec(),
-                entries: condense(entries).into_iter().map(CachedEntry::from_entry).collect(),
+                dependencies: dependencies.to_vec(),
+                entries: condense(entries)
+                    .into_iter()
+                    .map(CachedEntry::from_entry)
+                    .collect(),
             },
         );
     }
@@ -99,18 +138,27 @@ impl ScanCache {
         if let Some(parent) = self.path.parent() {
             std::fs::create_dir_all(parent)?;
         }
-        let doc = CacheFile { version: CACHE_VERSION, timezone: self.timezone, files: self.files };
+        let doc = CacheFile {
+            version: CACHE_VERSION,
+            timezone: self.timezone,
+            files: self.files,
+        };
         let bytes = serde_json::to_vec(&doc)?;
-        let tmp = self.path.with_extension(format!("tmp-{}", std::process::id()));
+        let tmp = self
+            .path
+            .with_extension(format!("tmp-{}", std::process::id()));
         std::fs::write(&tmp, bytes)?;
         std::fs::rename(tmp, self.path)
     }
 }
 
-fn fingerprint(path: &Path) -> Option<(u64, u128)> {
+pub fn fingerprint(path: &Path) -> Option<Fingerprint> {
     let meta = path.metadata().ok()?;
     let modified = meta.modified().ok()?.duration_since(UNIX_EPOCH).ok()?;
-    Some((meta.len(), modified.as_nanos()))
+    Some(Fingerprint {
+        size: meta.len(),
+        mtime_ns: modified.as_nanos(),
+    })
 }
 
 fn condense(entries: &[Entry]) -> Vec<Entry> {
@@ -123,7 +171,13 @@ fn condense(entries: &[Entry]) -> Vec<Entry> {
     }
     grouped
         .into_iter()
-        .map(|((date, source, model, speed), usage)| Entry { date, source, model, speed, usage })
+        .map(|((date, source, model, speed), usage)| Entry {
+            date,
+            source,
+            model,
+            speed,
+            usage,
+        })
         .collect()
 }
 
@@ -159,7 +213,10 @@ mod tests {
             source: Source::Claude,
             model: model.into(),
             speed: "standard".into(),
-            usage: Usage { input, ..Default::default() },
+            usage: Usage {
+                input,
+                ..Default::default()
+            },
         }
     }
 
@@ -178,7 +235,13 @@ mod tests {
         let path = dir.join("cache.json");
 
         let mut cache = ScanCache::load(&path, true);
-        cache.store(&source, &[entry("2026-07-13", "m", 2), entry("2026-07-13", "m", 3)], &[10, 20]);
+        cache.store(
+            &source,
+            fingerprint(&source).unwrap(),
+            &[entry("2026-07-13", "m", 2), entry("2026-07-13", "m", 3)],
+            &[10, 20],
+            &[],
+        );
         cache.save().unwrap();
 
         let mut loaded = ScanCache::load(&path, true);
@@ -197,7 +260,13 @@ mod tests {
         std::fs::write(&source, "one").unwrap();
         let path = dir.join("cache.json");
         let mut cache = ScanCache::load(&path, true);
-        cache.store(&source, &[entry("2026-07-13", "m", 1)], &[10]);
+        cache.store(
+            &source,
+            fingerprint(&source).unwrap(),
+            &[entry("2026-07-13", "m", 1)],
+            &[10],
+            &[],
+        );
         cache.save().unwrap();
 
         std::fs::write(&source, "now a different size").unwrap();
@@ -212,12 +281,56 @@ mod tests {
         std::fs::write(&source, "fixture").unwrap();
         let path = dir.join("cache.json");
         let mut cache = ScanCache::load(&path, true);
-        cache.store(&source, &[entry("2026-07-13", "m", 1)], &[42]);
+        cache.store(
+            &source,
+            fingerprint(&source).unwrap(),
+            &[entry("2026-07-13", "m", 1)],
+            &[42],
+            &[],
+        );
         cache.save().unwrap();
 
         let mut loaded = ScanCache::load(&path, true);
         let mut seen = HashSet::from([42]);
         assert!(loaded.take_if_fresh(&source, &mut seen).is_none());
+    }
+
+    #[test]
+    fn append_after_scan_is_not_cached_as_complete() {
+        let dir = temp("append-race");
+        let source = dir.join("session.jsonl");
+        std::fs::write(&source, "first").unwrap();
+        let before = fingerprint(&source).unwrap();
+        std::fs::write(&source, "first plus appended data").unwrap();
+
+        let mut cache = ScanCache::load(&dir.join("cache.json"), true);
+        assert!(!cache.store_if_unchanged(
+            &source,
+            before,
+            &[entry("2026-07-13", "m", 1)],
+            &[1],
+            &[],
+        ));
+    }
+
+    #[test]
+    fn missing_prior_file_dependency_forces_rescan() {
+        let dir = temp("dependency");
+        let source = dir.join("duplicate.jsonl");
+        std::fs::write(&source, "fixture").unwrap();
+        let path = dir.join("cache.json");
+        let mut cache = ScanCache::load(&path, true);
+        // This file contributed nothing because hash 99 belonged to an earlier
+        // file. If that earlier file disappears, this file must be rescanned.
+        cache.store(&source, fingerprint(&source).unwrap(), &[], &[], &[99]);
+        cache.save().unwrap();
+
+        let mut loaded = ScanCache::load(&path, true);
+        assert!(loaded.take_if_fresh(&source, &mut HashSet::new()).is_none());
+
+        let mut loaded = ScanCache::load(&path, true);
+        let mut seen = HashSet::from([99]);
+        assert!(loaded.take_if_fresh(&source, &mut seen).is_some());
     }
 
     #[test]
@@ -227,7 +340,13 @@ mod tests {
         std::fs::write(&source, "fixture").unwrap();
         let path = dir.join("cache.json");
         let mut cache = ScanCache::load(&path, true);
-        cache.store(&source, &[entry("2026-07-13", "m", 1)], &[42]);
+        cache.store(
+            &source,
+            fingerprint(&source).unwrap(),
+            &[entry("2026-07-13", "m", 1)],
+            &[42],
+            &[],
+        );
         cache.save().unwrap();
 
         let mut local = ScanCache::load(&path, false);

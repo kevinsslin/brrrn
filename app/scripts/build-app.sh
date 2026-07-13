@@ -1,17 +1,19 @@
 #!/bin/sh
 set -eu
 
-root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
-cd "$root"
+app_root=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+repo_root=$(CDPATH= cd -- "$app_root/.." && pwd)
 
+cargo build --manifest-path "$repo_root/Cargo.toml" --release
+cd "$app_root"
 swift build -c release
-bin_dir=$(swift build -c release --show-bin-path)
-app="$root/dist/BrrrnBar.app"
 
+app="$app_root/dist/BrrrnBar.app"
 rm -rf "$app"
 mkdir -p "$app/Contents/MacOS"
-cp "$bin_dir/BrrrnBar" "$app/Contents/MacOS/BrrrnBar"
-cp "$root/Resources/Info.plist" "$app/Contents/Info.plist"
-chmod +x "$app/Contents/MacOS/BrrrnBar"
+cp "$app_root/.build/release/BrrrnBar" "$app/Contents/MacOS/BrrrnBar"
+cp "$repo_root/target/release/brrrn" "$app/Contents/MacOS/brrrn"
+cp "$app_root/Resources/Info.plist" "$app/Contents/Info.plist"
+chmod +x "$app/Contents/MacOS/BrrrnBar" "$app/Contents/MacOS/brrrn"
 
 printf 'built %s\n' "$app"

@@ -60,7 +60,13 @@ fn print_window_row(agg: &Agg, label: &str, from: NaiveDate, to: NaiveDate) {
     );
 }
 
-pub fn print_report(agg: &Agg, period: &str, today: NaiveDate, min_date: Option<NaiveDate>, utc: bool) {
+pub fn print_report(
+    agg: &Agg,
+    period: &str,
+    today: NaiveDate,
+    min_date: Option<NaiveDate>,
+    utc: bool,
+) {
     let first = agg.daily.keys().next().copied().unwrap_or(today);
     let tz = if utc { "UTC" } else { "local time" };
     println!("brrrn: token burn across Claude Code + Codex (days in {tz})\n");
@@ -118,7 +124,10 @@ pub fn print_report(agg: &Agg, period: &str, today: NaiveDate, min_date: Option<
     if !unpriced.is_empty() {
         unpriced.sort();
         unpriced.dedup();
-        println!("\nnote: no pricing found for: {} (tokens counted, cost excluded)", unpriced.join(", "));
+        println!(
+            "\nnote: no pricing found for: {} (tokens counted, cost excluded)",
+            unpriced.join(", ")
+        );
     }
 }
 
@@ -128,7 +137,12 @@ pub fn print_daily(agg: &Agg, today: NaiveDate) {
     for (day, per_source) in agg.daily.range(from..=today) {
         let tokens: u64 = per_source.values().map(|d| d.tokens).sum();
         let cost: f64 = per_source.values().map(|d| d.cost).sum();
-        println!("{:<12} {:>10} {:>12}", day.to_string(), fmt_tokens(tokens), fmt_money(cost));
+        println!(
+            "{:<12} {:>10} {:>12}",
+            day.to_string(),
+            fmt_tokens(tokens),
+            fmt_money(cost)
+        );
     }
 }
 
@@ -214,7 +228,10 @@ pub fn json_value(agg: &Agg, period: &str, today: NaiveDate, utc: bool) -> serde
 }
 
 pub fn print_json(agg: &Agg, period: &str, today: NaiveDate, utc: bool) {
-    println!("{}", serde_json::to_string_pretty(&json_value(agg, period, today, utc)).unwrap());
+    println!(
+        "{}",
+        serde_json::to_string_pretty(&json_value(agg, period, today, utc)).unwrap()
+    );
 }
 
 #[cfg(test)]
@@ -252,9 +269,18 @@ mod tests {
                     source: Source::Claude,
                     model: model.into(),
                     speed: "standard".into(),
-                    usage: Usage { input, ..Default::default() },
+                    usage: Usage {
+                        input,
+                        ..Default::default()
+                    },
                 },
-                Some(Price { input: 1.0, output: 1.0, cache_read: 1.0, cache_w5m: 1.0, cache_w1h: 1.0 }),
+                Some(Price {
+                    input: 1.0,
+                    output: 1.0,
+                    cache_read: 1.0,
+                    cache_w5m: 1.0,
+                    cache_w1h: 1.0,
+                }),
             );
         }
         let v = json_value(&agg, "all", date, true);

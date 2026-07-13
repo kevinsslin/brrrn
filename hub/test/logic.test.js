@@ -200,6 +200,8 @@ test('validateDays rejects negative and non-finite numbers', () => {
   assert.equal(validateDays([day({ claude_usd: Infinity })]).ok, false);
   assert.equal(validateDays([day({ codex_usd: NaN })]).ok, false);
   assert.equal(validateDays([day({ tokens: '100' })]).ok, false);
+  assert.equal(validateDays([day({ tokens: 1.5 })]).ok, false);
+  assert.equal(validateDays([day({ models: { m: { input_tokens: 2.5, output_tokens: 1, cost_usd: 1 } } })]).ok, false);
   const badModel = day({ models: { m: { input_tokens: -5, output_tokens: 0, cost_usd: 0 } } });
   assert.equal(validateDays([badModel]).ok, false);
 });

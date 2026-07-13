@@ -31,7 +31,11 @@ impl Config {
     }
 
     pub fn load_or_default(path: &Path) -> Result<Self, String> {
-        if path.exists() { Self::load(path) } else { Ok(Self::default()) }
+        if path.exists() {
+            Self::load(path)
+        } else {
+            Ok(Self::default())
+        }
     }
 
     pub fn save(&self, path: &Path) -> Result<(), String> {
@@ -59,8 +63,14 @@ impl Config {
     }
 
     pub fn identity(&self) -> Result<(&str, &str, &str), String> {
-        let secret = self.secret.as_deref().ok_or("not joined; run: brrrn pit join <code> --as <handle>")?;
-        let machine = self.machine_id.as_deref().ok_or("missing machine_id in config")?;
+        let secret = self
+            .secret
+            .as_deref()
+            .ok_or("not joined; run: brrrn pit join <code> --as <handle>")?;
+        let machine = self
+            .machine_id
+            .as_deref()
+            .ok_or("missing machine_id in config")?;
         if self.handle.is_empty() {
             return Err("missing handle in config".to_string());
         }
@@ -181,29 +191,58 @@ pub fn random_hex(bytes: usize) -> Result<String, String> {
     Ok(buf.iter().map(|b| format!("{b:02x}")).collect())
 }
 
-fn request(method: &str, url: &str, body: Option<&serde_json::Value>) -> Result<serde_json::Value, String> {
+fn request(
+    method: &str,
+    url: &str,
+    body: Option<&serde_json::Value>,
+) -> Result<serde_json::Value, String> {
     let mut command = Command::new("curl");
-    command.args(["-sS", "-X", method, "-H", "content-type: application/json", "-w", "\n%{http_code}"]);
+    command.args([
+        "-sS",
+        "-X",
+        method,
+        "-H",
+        "content-type: application/json",
+        "-w",
+        "\n%{http_code}",
+    ]);
     if body.is_some() {
         command.args(["--data-binary", "@-"]);
     }
-    command.arg(url).stdout(Stdio::piped()).stderr(Stdio::piped());
+    command
+        .arg(url)
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped());
     if body.is_some() {
         command.stdin(Stdio::piped());
     }
-    let mut child = command.spawn().map_err(|e| format!("cannot run curl: {e}"))?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("cannot run curl: {e}"))?;
     if let Some(value) = body {
         let bytes = serde_json::to_vec(value).map_err(|e| e.to_string())?;
-        child.stdin.as_mut().unwrap().write_all(&bytes).map_err(|e| e.to_string())?;
+        child
+            .stdin
+            .as_mut()
+            .unwrap()
+            .write_all(&bytes)
+            .map_err(|e| e.to_string())?;
     }
     let output = child.wait_with_output().map_err(|e| e.to_string())?;
     if !output.status.success() {
-        return Err(format!("hub request failed: {}", String::from_utf8_lossy(&output.stderr).trim()));
+        return Err(format!(
+            "hub request failed: {}",
+            String::from_utf8_lossy(&output.stderr).trim()
+        ));
     }
     let text = String::from_utf8(output.stdout).map_err(|e| e.to_string())?;
     let (raw, status) = text.rsplit_once('\n').ok_or("invalid response from hub")?;
-    let status: u16 = status.trim().parse().map_err(|_| "invalid HTTP status from hub")?;
-    let value: serde_json::Value = serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({ "raw": raw }));
+    let status: u16 = status
+        .trim()
+        .parse()
+        .map_err(|_| "invalid HTTP status from hub")?;
+    let value: serde_json::Value =
+        serde_json::from_str(raw).unwrap_or_else(|_| serde_json::json!({ "raw": raw }));
     if !(200..300).contains(&status) {
         let message = value["error"].as_str().unwrap_or("hub request failed");
         return Err(format!("hub returned {status}: {message}"));
@@ -211,7 +250,10 @@ fn request(method: &str, url: &str, body: Option<&serde_json::Value>) -> Result<
     Ok(value)
 }
 
-pub fn post<T: for<'de> Deserialize<'de>>(url: &str, body: &serde_json::Value) -> Result<T, String> {
+pub fn post<T: for<'de> Deserialize<'de>>(
+    url: &str,
+    body: &serde_json::Value,
+) -> Result<T, String> {
     let value = request("POST", url, Some(body))?;
     serde_json::from_value(value).map_err(|e| format!("invalid hub response: {e}"))
 }
@@ -236,7 +278,10 @@ pub fn percent_encode(value: &str) -> String {
 pub fn format_board(board: &Board) -> String {
     let title = board.name.as_deref().unwrap_or(&board.code);
     let mut out = format!("{title}  [{}]\n", board.code);
-    out.push_str(&format!("  {:<3} {:<20} {:>12} {:>12} {:>12}  {}\n", "#", "handle", "today", "week", "month", "streak"));
+    out.push_str(&format!(
+        "  {:<3} {:<20} {:>12} {:>12} {:>12}  {}\n",
+        "#", "handle", "today", "week", "month", "streak"
+    ));
     for (idx, member) in board.members.iter().enumerate() {
         out.push_str(&format!(
             "  {:<3} {:<20} {:>12} {:>12} {:>12}  {}d\n",
@@ -264,14 +309,26 @@ mod tests {
     use crate::agg::{Entry, Usage};
     use crate::pricing::Price;
 
-    fn add(agg: &mut Agg, date: &str, source: Source, model: &str, input: u64, output: u64, input_price: f64) {
+    fn add(
+        agg: &mut Agg,
+        date: &str,
+        source: Source,
+        model: &str,
+        input: u64,
+        output: u64,
+        input_price: f64,
+    ) {
         agg.add_entry(
             &Entry {
                 date: date.parse().unwrap(),
                 source,
                 model: model.into(),
                 speed: "standard".into(),
-                usage: Usage { input, output, ..Default::default() },
+                usage: Usage {
+                    input,
+                    output,
+                    ..Default::default()
+                },
             },
             Some(Price {
                 input: input_price,
@@ -286,7 +343,15 @@ mod tests {
     #[test]
     fn submit_payload_sums_sources_and_preserves_model_detail() {
         let mut agg = Agg::default();
-        add(&mut agg, "2026-07-12", Source::Claude, "fable", 100, 10, 0.01);
+        add(
+            &mut agg,
+            "2026-07-12",
+            Source::Claude,
+            "fable",
+            100,
+            10,
+            0.01,
+        );
         add(&mut agg, "2026-07-12", Source::Codex, "gpt", 200, 20, 0.02);
         add(&mut agg, "2026-07-13", Source::Claude, "fable", 50, 5, 0.01);
 
@@ -306,7 +371,10 @@ mod tests {
         add(&mut agg, "2026-07-11", Source::Claude, "m", 1, 0, 1.0);
         add(&mut agg, "2026-07-12", Source::Claude, "m", 2, 0, 1.0);
         let days = build_submit_days(&agg, Some("2026-07-12".parse().unwrap()));
-        assert_eq!(days.iter().map(|d| d.date.as_str()).collect::<Vec<_>>(), ["2026-07-12"]);
+        assert_eq!(
+            days.iter().map(|d| d.date.as_str()).collect::<Vec<_>>(),
+            ["2026-07-12"]
+        );
     }
 
     #[test]

@@ -1,21 +1,29 @@
 use std::collections::HashSet;
-use std::hash::{DefaultHasher, Hash, Hasher};
 use std::io::BufRead;
 use std::path::Path;
 
 use crate::agg::{Entry, Source, Usage};
+use crate::hash::stable_hash;
 use crate::windows::parse_date;
 
 /// Scan one Claude Code session file (~/.claude/projects/**/*.jsonl). Each
 /// assistant message line carries a `message.usage` block with token counts,
 /// model, and speed. Resumed sessions copy history into new files, so entries
 /// are deduped on (message.id, requestId) against the shared `seen` set.
-/// Returns the entries this file contributed and the dedup hashes it claimed.
-pub fn scan_file(path: &Path, seen: &mut HashSet<u64>, utc: bool) -> (Vec<Entry>, Vec<u64>) {
+/// Returns contributed entries, hashes claimed by this file, and hashes whose
+/// contribution depended on an earlier file (needed for cache correctness).
+pub fn scan_file(
+    path: &Path,
+    seen: &mut HashSet<u64>,
+    utc: bool,
+) -> (Vec<Entry>, Vec<u64>, Vec<u64>, bool) {
     let mut entries = Vec::new();
     let mut claimed = Vec::new();
+    let mut dependencies = Vec::new();
+    let mut local_claims = HashSet::new();
+    let mut complete = true;
     let Ok(file) = std::fs::File::open(path) else {
-        return (entries, claimed);
+        return (entries, claimed, dependencies, false);
     };
     let mut reader = std::io::BufReader::with_capacity(1 << 20, file);
     let mut line = String::new();
@@ -23,15 +31,23 @@ pub fn scan_file(path: &Path, seen: &mut HashSet<u64>, utc: bool) -> (Vec<Entry>
     loop {
         line.clear();
         match reader.read_line(&mut line) {
-            Ok(0) | Err(_) => break,
+            Ok(0) => break,
             Ok(_) => {}
+            Err(_) => {
+                complete = false;
+                break;
+            }
         }
         if !line.contains("\"usage\"") || !line.contains("\"model\"") {
             continue;
         }
-        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else { continue };
+        let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) else {
+            continue;
+        };
         let msg = &v["message"];
-        let Some(model) = msg["model"].as_str() else { continue };
+        let Some(model) = msg["model"].as_str() else {
+            continue;
+        };
         if model == "<synthetic>" {
             continue;
         }
@@ -40,22 +56,31 @@ pub fn scan_file(path: &Path, seen: &mut HashSet<u64>, utc: bool) -> (Vec<Entry>
             continue;
         }
 
-        let mut dedup = DefaultHasher::new();
-        match (msg["id"].as_str(), v["requestId"].as_str()) {
-            (None, None) => v["uuid"].as_str().unwrap_or("").hash(&mut dedup),
-            (mid, rid) => (mid.unwrap_or(""), rid.unwrap_or("")).hash(&mut dedup),
-        }
-        let hash = dedup.finish();
+        let identity = match (msg["id"].as_str(), v["requestId"].as_str()) {
+            (None, None) => format!("u:{}", v["uuid"].as_str().unwrap_or("")),
+            (mid, rid) => format!("m:{}\0{}", mid.unwrap_or(""), rid.unwrap_or("")),
+        };
+        let hash = stable_hash(identity.as_bytes());
         if !seen.insert(hash) {
+            if !local_claims.contains(&hash) {
+                dependencies.push(hash);
+            }
             continue;
         }
 
         let (cache_w5m, cache_w1h) = match usage["cache_creation"].as_object() {
             Some(cc) => (
-                cc.get("ephemeral_5m_input_tokens").and_then(|x| x.as_u64()).unwrap_or(0),
-                cc.get("ephemeral_1h_input_tokens").and_then(|x| x.as_u64()).unwrap_or(0),
+                cc.get("ephemeral_5m_input_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0),
+                cc.get("ephemeral_1h_input_tokens")
+                    .and_then(|x| x.as_u64())
+                    .unwrap_or(0),
             ),
-            None => (usage["cache_creation_input_tokens"].as_u64().unwrap_or(0), 0),
+            None => (
+                usage["cache_creation_input_tokens"].as_u64().unwrap_or(0),
+                0,
+            ),
         };
         let u = Usage {
             input: usage["input_tokens"].as_u64().unwrap_or(0),
@@ -75,6 +100,7 @@ pub fn scan_file(path: &Path, seen: &mut HashSet<u64>, utc: bool) -> (Vec<Entry>
         };
 
         claimed.push(hash);
+        local_claims.insert(hash);
         entries.push(Entry {
             date,
             source: Source::Claude,
@@ -83,7 +109,7 @@ pub fn scan_file(path: &Path, seen: &mut HashSet<u64>, utc: bool) -> (Vec<Entry>
             usage: u,
         });
     }
-    (entries, claimed)
+    (entries, claimed, dependencies, complete)
 }
 
 #[cfg(test)]
@@ -105,6 +131,14 @@ mod tests {
     }
 
     #[test]
+    fn unreadable_or_missing_file_is_incomplete() {
+        let path = std::env::temp_dir().join("brrrn-definitely-missing-session.jsonl");
+        let _ = std::fs::remove_file(&path);
+        let (_, _, _, complete) = scan_file(&path, &mut HashSet::new(), true);
+        assert!(!complete);
+    }
+
+    #[test]
     fn parses_dedups_and_buckets_utc() {
         let content = [
             msg_line("m1", "r1", "claude-opus-4-8", r#","cache_creation":{"ephemeral_5m_input_tokens":100,"ephemeral_1h_input_tokens":50}"#),
@@ -118,16 +152,28 @@ mod tests {
         let path = fixture("basic.jsonl", &content);
 
         let mut seen = HashSet::new();
-        let (entries, claimed) = scan_file(&path, &mut seen, true);
+        let (entries, claimed, dependencies, complete) = scan_file(&path, &mut seen, true);
 
+        assert!(complete);
         assert_eq!(entries.len(), 2);
         assert_eq!(claimed.len(), 2);
+        assert!(dependencies.is_empty()); // duplicate was within this same file
 
         let e1 = &entries[0];
         assert_eq!(e1.model, "claude-opus-4-8");
         assert_eq!(e1.speed, "standard");
         assert_eq!(e1.date, "2026-07-13".parse().unwrap()); // UTC, not local
-        assert_eq!(e1.usage, Usage { input: 10, cache_read: 200, cache_w5m: 100, cache_w1h: 50, output: 20, reasoning: 0 });
+        assert_eq!(
+            e1.usage,
+            Usage {
+                input: 10,
+                cache_read: 200,
+                cache_w5m: 100,
+                cache_w1h: 50,
+                output: 20,
+                reasoning: 0
+            }
+        );
 
         let e2 = &entries[1];
         assert_eq!(e2.speed, "fast");
@@ -143,10 +189,11 @@ mod tests {
         let b = fixture("dup_b.jsonl", &line);
 
         let mut seen = HashSet::new();
-        let (ea, _) = scan_file(&a, &mut seen, true);
-        let (eb, hb) = scan_file(&b, &mut seen, true);
+        let (ea, _, _, _) = scan_file(&a, &mut seen, true);
+        let (eb, hb, dependencies, _) = scan_file(&b, &mut seen, true);
         assert_eq!(ea.len(), 1);
         assert_eq!(eb.len(), 0); // resumed-session copy is not double counted
         assert!(hb.is_empty());
+        assert_eq!(dependencies.len(), 1);
     }
 }
