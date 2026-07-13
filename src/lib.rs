@@ -5,4 +5,5 @@ pub mod codex;
 pub mod pricing;
 pub mod report;
 pub mod scan;
+pub mod social;
 pub mod windows;
