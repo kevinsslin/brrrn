@@ -1,6 +1,6 @@
 # brrrn PRD
 
-Version 0.1, 2026-07-14. Owner: Kevin. Status: draft, pre-commit.
+Version 0.1, 2026-07-14. Owner: Kevin. Status: implemented local prototype.
 
 ## One-liner
 
@@ -54,8 +54,8 @@ grouping by year-month is a string prefix.
 
 Rust binary. Scans `~/.claude/projects` and `~/.codex/sessions`, aggregates
 by model and speed/effort, prices via cached LiteLLM table, prints tables or
-`--json`. 8.9GB of history scans in ~8s cold; incremental cache (planned)
-brings repeat runs to milliseconds.
+`--json`. 8.9GB of history scans in ~8s cold; the implemented per-file
+incremental cache brings typical repeat runs to ~0.1s.
 
 New subcommands for the social layer:
 
@@ -85,15 +85,16 @@ models (1M Haiku tokens is not 1M Fable tokens), so cost carries the
 ranking and tokens are detail. Applies to the me-section model list, the
 pit board rows, and drill-down views.
 
-Refresh: FSEvents on the two log dirs for own numbers (near-realtime);
-poll the pit board every 5 minutes.
+Refresh: directory filesystem events (debounced 5 seconds) plus a 60-second
+fallback for own numbers; every 5 minutes auto-submit local aggregates, then
+pull the latest pit board.
 
 ### 3. Sharing (P2, deliberately cheap)
 
 Sharing is a growth feature, not core. Two stages:
-- **P2a `brrrn flex`**: compose a text summary ("I burned $4,799 of tokens
-  today 🔥 my crew burned $6,342") and open a pre-filled tweet intent URL.
-  Zero infrastructure, ~30 lines.
+- **P2a `brrrn flex` (implemented)**: compose a text summary ("I burned
+  $4,799 of tokens today 🔥 my crew burned $6,342") and open a pre-filled
+  tweet intent URL. Zero additional infrastructure.
 - **P2b image card**: Spotify-Wrapped-style PNG rendered locally (weekly
   recap, model breakdown). Ship only if P2a shows demand.
 
@@ -118,10 +119,11 @@ per (handle, machine, date); the board sums across machines and re-submits
 from the same machine overwrite that machine's row. Laptop plus desktop
 therefore adds up instead of double-counting or clobbering.
 
-## Backend: Cloudflare Worker + KV
+## Backend: Cloudflare Worker + KV + Durable Object
 
-One worker, ~150 lines, free tier is plenty (a pit of 10 friends writes a
-few KB/day).
+One Worker stores aggregate records in KV. A single low-traffic Durable Object
+serializes handle claims, join throttling, and writes so concurrent requests do
+not lose data. The free tier is plenty for small friend groups.
 
 Endpoints:
 
@@ -141,14 +143,17 @@ GET  /pit/:code/member/:h    -> { handle, days: [{ date, tokens, cost_usd }] }
 KV schema (key -> value):
 
 ```
-pit:<code>                        -> { name, created_at }
-member:<code>:<handle>            -> { secret_hash, joined_at }
-days:<code>:<handle>:<machine_id> -> { "<date>": { t, c, cc, cx, models } , ... }
-ratelimit:join:<ip>               -> counter with TTL
+pit:<code>                                  -> { name, created_at }
+member:<code>:<handle>                      -> { secret_hash, joined_at }
+day:<code>:<handle>:<machine_id>:<date>     -> { t, c, cc, cx, models }
+ratelimit:join:<ip>                         -> counter with TTL
+Coordinator Durable Object                 -> serial request gate
 ```
 
-Board reads list `days:<code>:*` by prefix and merge in the worker. If pits
-outgrow KV list performance, migrate to D1; the API does not change.
+Board reads list `day:<code>:*` by prefix and merges records in the Worker.
+Each machine/date is an independent key, so overlapping submissions cannot
+clobber unrelated dates. If pits outgrow KV list performance, migrate to D1;
+the API does not change.
 
 ## Identity and trust
 
@@ -166,7 +171,8 @@ outgrow KV list performance, migrate to D1; the API does not change.
 ## Privacy
 
 What leaves the machine, exhaustively: pit code, handle, machine_id (random),
-UTC date, token count, USD cost, claude/codex cost split, top model name.
+UTC date, token count, USD cost, claude/codex cost split, and per-model
+input/output tokens plus model cost.
 Never: prompts, file paths, repo names, session content, timestamps finer
 than a day. This list goes in the README verbatim.
 
@@ -182,12 +188,13 @@ than a day. This list goes in the README verbatim.
 ## Milestones
 
 1. **M0 (done)**: CLI scanner, pricing, UTC days, `--json`.
-2. **M1**: incremental cache; `this week`/`this month` windows replace
-   rolling ones in default output.
-3. **M2**: worker + `pit new/join/submit/board/show`. Two-person test with a
-   real friend.
-4. **M3**: menu bar app consuming `brrrn --json` and the board API.
-5. **P2**: `brrrn flex` text share; image cards only if demand shows.
+2. **M1 (done)**: incremental cache; calendar week/month; $5 streak.
+3. **M2 (done locally)**: Worker + `pit new/join/submit/board/show`, with
+   end-to-end local HTTP verification. Live Cloudflare deployment and a real
+   two-person test remain release steps.
+4. **M3 (done)**: native menu bar app consuming CLI JSON and the board API,
+   with automatic five-minute social sync.
+5. **P2a (done)**: `brrrn flex` text share. Image cards remain demand-driven.
 
 ## Resolved decisions
 
@@ -197,9 +204,10 @@ than a day. This list goes in the README verbatim.
   "today" below $5 does not break a streak until the UTC day ends.
 - **Cost-primary display** with hover token detail (see menu bar section).
 
-## Open questions
+## Remaining release questions
 
-- Submit cadence: piggyback on menu bar refresh vs launchd timer for
-  CLI-only users.
+- CLI-only background submit via launchd (the menu app already syncs every
+  five minutes; CLI-only users submit manually).
 - Fable/Opus fast-mode pricing once published: needs a (model, speed)
   pricing key, engine already groups by speed.
+- Signing, notarization, DMG packaging, and Sparkle update feed.

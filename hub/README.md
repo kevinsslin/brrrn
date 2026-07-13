@@ -1,7 +1,8 @@
 # brrrn hub
 
-Cloudflare Worker + KV backend for private brrrn pits. It stores daily
-aggregates only. Prompts, repository names, paths, and raw sessions never
+Cloudflare Worker + KV backend for private brrrn pits. A small Durable Object
+serializes joins and submissions while KV stores one aggregate per machine and
+UTC day. It stores daily aggregates only. Prompts, repository names, paths, and raw sessions never
 leave a member's Mac.
 
 ## Test

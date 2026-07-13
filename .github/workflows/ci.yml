@@ -1,0 +1,32 @@
+name: CI
+
+on:
+  push:
+  pull_request:
+
+jobs:
+  test:
+    runs-on: macos-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Rust format
+        run: cargo fmt --check
+
+      - name: Rust lint
+        run: cargo clippy --all-targets -- -D warnings
+
+      - name: Rust tests
+        run: cargo test
+
+      - name: Worker tests
+        working-directory: hub
+        run: npm test
+
+      - name: Swift tests
+        working-directory: app
+        run: swift test
+
+      - name: Build macOS app bundle
+        working-directory: app
+        run: ./scripts/build-app.sh

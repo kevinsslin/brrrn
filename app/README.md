@@ -24,14 +24,15 @@ notarization, DMG packaging, and Sparkle updates are release automation work.
 
 ## Run during development
 
-Build the Rust CLI first, then launch the menu bar app:
+Run directly from SwiftPM during development:
 
 ```sh
-cd ..
-cargo build --release
 cd app
 BRRRN_BIN=../target/release/brrrn swift run BrrrnBar
 ```
+
+`build-app.sh` builds and embeds the Rust CLI automatically, so the packaged
+app does not depend on Homebrew or a source checkout.
 
 The app runs as an accessory with no Dock icon. Quit from the power button in
 the menu footer.
@@ -41,9 +42,13 @@ the menu footer.
 The app checks, in order:
 
 1. `BRRRN_BIN`
-2. `/opt/homebrew/bin/brrrn`
-3. `/usr/local/bin/brrrn`
-4. `~/repos/kevin-dev/brrrn/target/release/brrrn`
+2. `brrrn` bundled beside `BrrrnBar`
+3. `/opt/homebrew/bin/brrrn`
+4. `/usr/local/bin/brrrn`
+5. `~/repos/kevin-dev/brrrn/target/release/brrrn`
+
+`BRRRN_CONFIG` can override the normal `~/.config/brrrn/config.json` path
+for development and end-to-end testing.
 
 ## Friends
 
