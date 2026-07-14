@@ -3,6 +3,7 @@ import {
   generateJoinCode,
   memberSeries,
   normalizeHandle,
+  STREAK_THRESHOLD_USD,
   validateDays,
 } from './logic.js';
 
@@ -171,7 +172,7 @@ async function getBoard(env, code, now) {
     return { handle, ...aggregateMember(records, now) };
   }));
   members.sort((a, b) => b.today_usd - a.today_usd || a.handle.localeCompare(b.handle));
-  return json({ name: pit.name ?? null, code, members }, 200, true);
+  return json({ name: pit.name ?? null, code, streak_threshold_usd: STREAK_THRESHOLD_USD, members }, 200, true);
 }
 
 async function getMember(env, code, handleValue) {
@@ -181,7 +182,7 @@ async function getMember(env, code, handleValue) {
     return error('member not found', 404, true);
   }
   const records = await dailyRecords(env, `day:${code}:${handle}:`);
-  return json({ handle, days: memberSeries(records) }, 200, true);
+  return json({ handle, streak_threshold_usd: STREAK_THRESHOLD_USD, days: memberSeries(records) }, 200, true);
 }
 
 async function coordinatedRoute(request, env) {

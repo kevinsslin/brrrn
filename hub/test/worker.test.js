@@ -115,6 +115,7 @@ test('end to end: create pit, join, submit, board, member series', async () => {
   assert.equal(board.headers.get('content-type'), 'application/json');
   assert.equal(board.data.name, '台北燒錢俱樂部');
   assert.equal(board.data.code, code);
+  assert.equal(board.data.streak_threshold_usd, 5);
   assert.equal(board.data.members.length, 1);
 
   const alice = board.data.members[0];
@@ -159,6 +160,7 @@ test('end to end: create pit, join, submit, board, member series', async () => {
   assert.equal(member.headers.get('access-control-allow-origin'), '*');
   assert.deepEqual(member.data, {
     handle: 'alice',
+    streak_threshold_usd: 5,
     days: [
       { date: '2026-01-04', tokens: 900, cost_usd: 7 },
       { date: '2026-01-06', tokens: 350, cost_usd: 6 },
