@@ -56,6 +56,13 @@ final class BrrrnCoreTests: XCTestCase {
         XCTAssertEqual(Format.tokens(2_100_000_000), "2.10B")
     }
 
+    func testUTCActivityDateFormatting() {
+        let date = utcDate(2026, 7, 14)
+        XCTAssertEqual(Format.utcDate(date), "Tuesday, July 14, 2026 UTC")
+        XCTAssertEqual(Format.utcMonthDay(date), "Jul 14")
+        XCTAssertEqual(Format.utcMonth(date), "Jul")
+    }
+
     func testBinaryLookupOrderAndOverride() {
         let existing = Set(["/custom/brrrn", "/Applications/BrrrnBar.app/Contents/MacOS/brrrn"])
         let locator = BinaryLocator(
@@ -106,6 +113,22 @@ final class BrrrnCoreTests: XCTestCase {
             environment: ["BRRRN_CONFIG": "/tmp/custom-brrrn.json"]
         )
         XCTAssertEqual(url.path, "/tmp/custom-brrrn.json")
+    }
+
+    func testSocialStreakThresholdDecodesAndDefaultsForOlderHubs() throws {
+        let boardData = #"{"name":"crew","code":"c","streak_threshold_usd":7,"members":[]}"#.data(using: .utf8)!
+        let board = try JSONDecoder().decode(PitBoard.self, from: boardData)
+        XCTAssertEqual(board.streakThresholdUSD, 7)
+        XCTAssertEqual(board.effectiveStreakThresholdUSD, 7)
+
+        let legacyBoardData = #"{"name":"crew","code":"c","members":[]}"#.data(using: .utf8)!
+        let legacyBoard = try JSONDecoder().decode(PitBoard.self, from: legacyBoardData)
+        XCTAssertNil(legacyBoard.streakThresholdUSD)
+        XCTAssertEqual(legacyBoard.effectiveStreakThresholdUSD, 5)
+
+        let memberData = #"{"handle":"kevin","streak_threshold_usd":7,"days":[]}"#.data(using: .utf8)!
+        let member = try JSONDecoder().decode(MemberDetail.self, from: memberData)
+        XCTAssertEqual(member.effectiveStreakThresholdUSD, 7)
     }
 
     private func model(_ name: String, cost: Double?, tokens: Int) -> BurnReport.ModelUsage {

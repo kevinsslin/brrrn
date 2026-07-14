@@ -36,6 +36,26 @@ public enum Format {
         }
     }
 
+    public static func utcDate(_ date: Date) -> String {
+        utcFormatter("EEEE, MMMM d, yyyy").string(from: date) + " UTC"
+    }
+
+    public static func utcMonthDay(_ date: Date) -> String {
+        utcFormatter("MMM d").string(from: date)
+    }
+
+    public static func utcMonth(_ date: Date) -> String {
+        utcFormatter("MMM").string(from: date)
+    }
+
+    private static func utcFormatter(_ format: String) -> DateFormatter {
+        let formatter = DateFormatter()
+        formatter.locale = Locale(identifier: "en_US_POSIX")
+        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.dateFormat = format
+        return formatter
+    }
+
     /// Relative "last updated" text for the footer.
     public static func relativeTime(from date: Date, to now: Date = Date()) -> String {
         let seconds = now.timeIntervalSince(date)

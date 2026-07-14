@@ -4,12 +4,30 @@ import Foundation
 public struct PitBoard: Codable, Sendable, Equatable {
     public var name: String?
     public var code: String
+    public var streakThresholdUSD: Double?
     public var members: [Member]
 
-    public init(name: String?, code: String, members: [Member]) {
+    enum CodingKeys: String, CodingKey {
+        case name
+        case code
+        case streakThresholdUSD = "streak_threshold_usd"
+        case members
+    }
+
+    public init(
+        name: String?,
+        code: String,
+        streakThresholdUSD: Double? = nil,
+        members: [Member]
+    ) {
         self.name = name
         self.code = code
+        self.streakThresholdUSD = streakThresholdUSD
         self.members = members
+    }
+
+    public var effectiveStreakThresholdUSD: Double {
+        streakThresholdUSD ?? StreakPolicy.defaultThresholdUSD
     }
 
     /// Members ranked by today's burn, descending. Ties break on week burn,
@@ -89,11 +107,27 @@ public struct PitBoard: Codable, Sendable, Equatable {
 /// Decoded response of `GET {hub_url}/pit/{code}/member/{handle}`.
 public struct MemberDetail: Codable, Sendable, Equatable {
     public var handle: String
+    public var streakThresholdUSD: Double?
     public var days: [BurnReport.DailyEntry]
 
-    public init(handle: String, days: [BurnReport.DailyEntry]) {
+    enum CodingKeys: String, CodingKey {
+        case handle
+        case streakThresholdUSD = "streak_threshold_usd"
+        case days
+    }
+
+    public init(
+        handle: String,
+        streakThresholdUSD: Double? = nil,
+        days: [BurnReport.DailyEntry]
+    ) {
         self.handle = handle
+        self.streakThresholdUSD = streakThresholdUSD
         self.days = days
+    }
+
+    public var effectiveStreakThresholdUSD: Double {
+        streakThresholdUSD ?? StreakPolicy.defaultThresholdUSD
     }
 }
 
