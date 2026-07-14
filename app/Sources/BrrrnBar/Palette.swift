@@ -15,8 +15,8 @@ enum BrrrnPalette {
     }
 
     static func heatmap(_ level: DailyCostLevel, _ scheme: ColorScheme) -> Color {
-        let light = [0x86B6EF, 0x5598E7, 0x2A78D6, 0x1C5CAB, 0x104281]
-        let dark = [0x184F95, 0x256ABF, 0x3987E5, 0x6DA7EC, 0xB7D3F6]
+        let light = [0xC0652D, 0xA94C0A, 0x903800, 0x742B00, 0x571F00]
+        let dark = [0xFFE0C7, 0xFFB778, 0xF39648, 0xDC7726, 0xBC5B00]
         guard level != .none else { return heatmapEmpty(scheme) }
         let values = scheme == .dark ? dark : light
         return color(values[level.rawValue - 1])

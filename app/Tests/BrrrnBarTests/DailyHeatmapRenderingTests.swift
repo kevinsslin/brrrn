@@ -66,9 +66,11 @@ final class DailyHeatmapRenderingTests: XCTestCase {
 
     private func fixtureGrid(weeks: Int) -> UTCActivityGrid {
         let entries = [
-            BurnReport.DailyEntry(date: "2026-07-12", tokens: 500, costUSD: 4),
-            BurnReport.DailyEntry(date: "2026-07-13", tokens: 900, costUSD: 8),
-            BurnReport.DailyEntry(date: "2026-07-14", tokens: 1_200, costUSD: 12),
+            BurnReport.DailyEntry(date: "2026-07-10", tokens: 100, costUSD: 1),
+            BurnReport.DailyEntry(date: "2026-07-11", tokens: 500, costUSD: 5),
+            BurnReport.DailyEntry(date: "2026-07-12", tokens: 900, costUSD: 25),
+            BurnReport.DailyEntry(date: "2026-07-13", tokens: 1_200, costUSD: 100),
+            BurnReport.DailyEntry(date: "2026-07-14", tokens: 2_000, costUSD: 500),
         ]
         return UTCActivityGrid(
             entries: entries,

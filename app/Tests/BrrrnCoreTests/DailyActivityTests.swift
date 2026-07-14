@@ -21,6 +21,13 @@ final class DailyActivityTests: XCTestCase {
         XCTAssertEqual(grid.cells.first(where: { $0.isToday })?.dateKey, "2026-01-13")
     }
 
+    func testCostLevelCasesStayInAscendingSpendOrder() {
+        XCTAssertEqual(
+            Array(DailyCostLevel.allCases.dropFirst()),
+            [.belowThreshold, .active, .high, .veryHigh, .extreme]
+        )
+    }
+
     func testCostLevelsUseStreakRelativeBoundaries() {
         let entries = [
             entry("2026-07-13", tokens: 1_000_000, cost: 0),
