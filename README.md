@@ -6,6 +6,33 @@ private group of friends.
 
 No global leaderboard. No accounts. No prompts leave your Mac.
 
+**Ultralight: about 891 KB compressed and 2.4 MB installed.**
+
+## Ultralight by design
+
+brrrn is deliberately tiny. The current clean Apple Silicon release build
+measures:
+
+| Artifact | Size |
+|---|---:|
+| Compressed app download | **891 KB** |
+| Installed `BrrrnBar.app` | **2.4 MB** |
+| Embedded Rust CLI | 1.31 MB |
+| Native SwiftUI binary | 1.07 MB |
+| Tracked source code | 221 KB |
+
+These are measured release artifacts, not estimates. Build caches are larger,
+but they are never shipped. CI enforces a 2 MB compressed-download budget so
+future releases stay ultralight.
+
+Reproduce the measurement locally:
+
+```sh
+cd app
+./scripts/build-app.sh
+./scripts/measure-size.sh
+```
+
 ## What is included
 
 - **Rust CLI and engine**: local Claude Code + Codex log scanning, model/cache

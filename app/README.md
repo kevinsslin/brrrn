@@ -16,8 +16,12 @@ swift test
 
 ```sh
 ./scripts/build-app.sh
+./scripts/measure-size.sh
 open dist/BrrrnBar.app
 ```
+
+The current release build is about 891 KB compressed and 2.4 MB installed.
+CI fails if the compressed app exceeds the 2 MB ultralight budget.
 
 The bundle declares `LSUIElement`, so it has no Dock icon. Signing,
 notarization, DMG packaging, and Sparkle updates are release automation work.

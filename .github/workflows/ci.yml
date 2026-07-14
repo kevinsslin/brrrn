@@ -30,3 +30,7 @@ jobs:
       - name: Build macOS app bundle
         working-directory: app
         run: ./scripts/build-app.sh
+
+      - name: Enforce ultralight app size
+        working-directory: app
+        run: ./scripts/measure-size.sh
