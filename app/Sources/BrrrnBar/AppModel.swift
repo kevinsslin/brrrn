@@ -21,6 +21,7 @@ final class AppModel: ObservableObject {
     @Published var lastUpdated: Date?
 
     private let pitClient = PitClient()
+    private let configStore = BrrrnConfigStore()
     private var watcher: DirectoryWatcher?
     private var debounceTask: Task<Void, Never>?
     private var refreshLoop: Task<Void, Never>?
@@ -91,12 +92,41 @@ final class AppModel: ObservableObject {
         }
 
         let pitIsDue = forcePit || lastPitRefresh.map { Date().timeIntervalSince($0) >= 300 } ?? true
-        if pitIsDue, let config, config.hasPits {
+        if pitIsDue {
+            await refreshBoards(binary: binary)
+        }
+    }
+
+    private func refreshBoards(binary: String) async {
+        switch await configStore.load() {
+        case .missing:
+            boards = []
+        case .malformed(let message):
+            boards = []
+            errorMessage = BrrrnConfigStoreError.malformed(message).localizedDescription
+        case .valid(let config) where !config.hasPits:
+            boards = []
+        case .valid:
             do {
-                // The menu app is the background sync loop: local aggregates
-                // go up first, then the refreshed friend board comes down.
-                try await LocalEngine.submit(binary: binary)
-                boards = try await pitClient.boards(config: config)
+                // Keep app-side config mutations queued while the Rust process
+                // reads and updates the same file, then fetch with fresh state.
+                try await configStore.serialize {
+                    try await LocalEngine.submit(binary: binary)
+                }
+                let refreshedConfig: BrrrnConfig
+                switch await configStore.load() {
+                case .valid(let config):
+                    refreshedConfig = config
+                case .missing:
+                    boards = []
+                    throw BrrrnConfigStoreError.fileSystem(
+                        "brrrn config disappeared during submission"
+                    )
+                case .malformed(let message):
+                    boards = []
+                    throw BrrrnConfigStoreError.malformed(message)
+                }
+                boards = try await pitClient.boards(config: refreshedConfig)
                 lastPitRefresh = Date()
             } catch {
                 errorMessage = error.localizedDescription

@@ -1,7 +1,10 @@
 use std::collections::{BTreeMap, HashSet};
+use std::fs::{File, OpenOptions};
 use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::{Command, Stdio};
+use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::{Arc, Mutex, OnceLock};
 
 use chrono::NaiveDate;
 use serde::{Deserialize, Serialize};
@@ -10,6 +13,7 @@ use crate::agg::{Agg, Source};
 
 #[derive(Debug, Clone, Serialize, Deserialize, Default)]
 pub struct Config {
+    #[serde(default)]
     pub hub_url: String,
     #[serde(default)]
     pub handle: String,
@@ -20,7 +24,11 @@ pub struct Config {
     #[serde(default)]
     pub pits: Vec<String>,
     #[serde(default)]
+    pub relationships: Vec<String>,
+    #[serde(default)]
     pub backfilled_pits: Vec<String>,
+    #[serde(flatten)]
+    pub extra: BTreeMap<String, serde_json::Value>,
 }
 
 impl Config {
@@ -38,20 +46,123 @@ impl Config {
         }
     }
 
-    pub fn save(&self, path: &Path) -> Result<(), String> {
-        if let Some(parent) = path.parent() {
-            std::fs::create_dir_all(parent)
-                .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+    pub fn update<F>(path: &Path, change: F) -> Result<Self, String>
+    where
+        F: FnOnce(&mut Self) -> Result<(), String>,
+    {
+        let process_mutex = process_mutex(path)?;
+        let _process_guard = process_mutex
+            .lock()
+            .map_err(|_| "config process lock is poisoned".to_string())?;
+        let _lock = ConfigLock::acquire(path)?;
+        let mut config = Self::load_or_default(path)?;
+        change(&mut config)?;
+        config.save_unlocked(path)?;
+        Ok(config)
+    }
+
+    pub fn append_pit(path: &Path, code: &str) -> Result<Self, String> {
+        Self::append_unique(path, code, |config| &mut config.pits)
+    }
+
+    pub fn append_relationship(path: &Path, identifier: &str) -> Result<Self, String> {
+        Self::append_unique(path, identifier, |config| &mut config.relationships)
+    }
+
+    pub fn append_backfill_marker(path: &Path, identifier: &str) -> Result<Self, String> {
+        Self::append_unique(path, identifier, |config| &mut config.backfilled_pits)
+    }
+
+    pub fn append_backfill_marker_if_matches(
+        path: &Path,
+        expected: &Self,
+        identifier: &str,
+    ) -> Result<Self, String> {
+        let identifier = identifier.trim();
+        if identifier.is_empty() {
+            return Err("social identifier cannot be empty".to_string());
         }
-        let bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
-        let tmp = path.with_extension(format!("tmp-{}", std::process::id()));
-        std::fs::write(&tmp, bytes).map_err(|e| format!("cannot write config: {e}"))?;
-        #[cfg(unix)]
-        {
-            use std::os::unix::fs::PermissionsExt;
-            let _ = std::fs::set_permissions(&tmp, std::fs::Permissions::from_mode(0o600));
+        Self::update(path, |config| {
+            let identity_matches = config.hub_url == expected.hub_url
+                && config.handle == expected.handle
+                && config.secret == expected.secret
+                && config.machine_id == expected.machine_id;
+            if !identity_matches || !config.pits.iter().any(|pit| pit == identifier) {
+                return Err(
+                    "config changed during submission; backfill marker was not saved".to_string(),
+                );
+            }
+            if !config
+                .backfilled_pits
+                .iter()
+                .any(|marker| marker == identifier)
+            {
+                config.backfilled_pits.push(identifier.to_string());
+            }
+            Ok(())
+        })
+    }
+
+    fn append_unique<F>(path: &Path, value: &str, field: F) -> Result<Self, String>
+    where
+        F: FnOnce(&mut Self) -> &mut Vec<String>,
+    {
+        let normalized = value.trim();
+        if normalized.is_empty() {
+            return Err("social identifier cannot be empty".to_string());
         }
-        std::fs::rename(&tmp, path).map_err(|e| format!("cannot save config: {e}"))
+        Self::update(path, |config| {
+            let values = field(config);
+            if !values.iter().any(|existing| existing == normalized) {
+                values.push(normalized.to_string());
+            }
+            Ok(())
+        })
+    }
+
+    fn save_unlocked(&self, path: &Path) -> Result<(), String> {
+        let parent = path
+            .parent()
+            .ok_or_else(|| format!("config has no parent directory: {}", path.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+
+        let mut bytes = serde_json::to_vec_pretty(self).map_err(|e| e.to_string())?;
+        bytes.push(b'\n');
+        static NEXT_TEMPORARY: AtomicU64 = AtomicU64::new(0);
+        let sequence = NEXT_TEMPORARY.fetch_add(1, Ordering::Relaxed);
+        let temporary = parent.join(format!(
+            ".{}.tmp-{}-{sequence}",
+            path.file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("config"),
+            std::process::id()
+        ));
+
+        let result = (|| {
+            let mut options = OpenOptions::new();
+            options.write(true).create_new(true);
+            #[cfg(unix)]
+            {
+                use std::os::unix::fs::OpenOptionsExt;
+                options.mode(0o600);
+            }
+            let mut file = options
+                .open(&temporary)
+                .map_err(|e| format!("cannot create temporary config: {e}"))?;
+            file.write_all(&bytes)
+                .map_err(|e| format!("cannot write temporary config: {e}"))?;
+            file.sync_all()
+                .map_err(|e| format!("cannot sync temporary config: {e}"))?;
+            std::fs::rename(&temporary, path).map_err(|e| format!("cannot save config: {e}"))?;
+            protect_private(path)?;
+            sync_parent_directory(parent)?;
+            Ok(())
+        })();
+        if result.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        result
     }
 
     pub fn hub(&self) -> Result<&str, String> {
@@ -76,6 +187,127 @@ impl Config {
         }
         Ok((&self.handle, secret, machine))
     }
+}
+
+fn process_mutex(config_path: &Path) -> Result<Arc<Mutex<()>>, String> {
+    static MUTEXES: OnceLock<Mutex<BTreeMap<PathBuf, Arc<Mutex<()>>>>> = OnceLock::new();
+    let key = std::path::absolute(config_lock_path(config_path))
+        .map_err(|e| format!("cannot resolve config lock path: {e}"))?;
+    let mut mutexes = MUTEXES
+        .get_or_init(|| Mutex::new(BTreeMap::new()))
+        .lock()
+        .map_err(|_| "config lock registry is poisoned".to_string())?;
+    Ok(mutexes
+        .entry(key)
+        .or_insert_with(|| Arc::new(Mutex::new(())))
+        .clone())
+}
+
+fn config_lock_path(config_path: &Path) -> PathBuf {
+    let mut lock_name = config_path.as_os_str().to_os_string();
+    lock_name.push(".lock");
+    PathBuf::from(lock_name)
+}
+
+struct ConfigLock {
+    file: File,
+}
+
+impl ConfigLock {
+    fn acquire(config_path: &Path) -> Result<Self, String> {
+        let parent = config_path
+            .parent()
+            .ok_or_else(|| format!("config has no parent directory: {}", config_path.display()))?;
+        std::fs::create_dir_all(parent)
+            .map_err(|e| format!("cannot create {}: {e}", parent.display()))?;
+        let lock_path = config_lock_path(config_path);
+        let mut options = OpenOptions::new();
+        options.read(true).write(true).create(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt;
+            options.mode(0o600);
+        }
+        let file = options
+            .open(&lock_path)
+            .map_err(|e| format!("cannot open config lock {}: {e}", lock_path.display()))?;
+        protect_private(&lock_path)?;
+        lock_file(&file)?;
+        Ok(Self { file })
+    }
+}
+
+impl Drop for ConfigLock {
+    fn drop(&mut self) {
+        unlock_file(&self.file);
+    }
+}
+
+#[cfg(unix)]
+fn lock_file(file: &File) -> Result<(), String> {
+    use std::os::fd::AsRawFd;
+
+    let mut lock = libc::flock {
+        l_type: libc::F_WRLCK as libc::c_short,
+        l_whence: libc::SEEK_SET as libc::c_short,
+        l_start: 0,
+        l_len: 0,
+        l_pid: 0,
+    };
+    loop {
+        let result = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLKW, &mut lock) };
+        if result == 0 {
+            return Ok(());
+        }
+        let error = std::io::Error::last_os_error();
+        if error.kind() != std::io::ErrorKind::Interrupted {
+            return Err(format!("cannot lock config: {error}"));
+        }
+    }
+}
+
+#[cfg(not(unix))]
+fn lock_file(_file: &File) -> Result<(), String> {
+    Ok(())
+}
+
+#[cfg(unix)]
+fn unlock_file(file: &File) {
+    use std::os::fd::AsRawFd;
+
+    let mut lock = libc::flock {
+        l_type: libc::F_UNLCK as libc::c_short,
+        l_whence: libc::SEEK_SET as libc::c_short,
+        l_start: 0,
+        l_len: 0,
+        l_pid: 0,
+    };
+    let _ = unsafe { libc::fcntl(file.as_raw_fd(), libc::F_SETLK, &mut lock) };
+}
+
+#[cfg(not(unix))]
+fn unlock_file(_file: &File) {}
+
+fn protect_private(path: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        use std::os::unix::fs::PermissionsExt;
+        std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600))
+            .map_err(|e| format!("cannot protect config {}: {e}", path.display()))?;
+    }
+    Ok(())
+}
+
+fn sync_parent_directory(parent: &Path) -> Result<(), String> {
+    #[cfg(unix)]
+    {
+        let directory = File::open(parent)
+            .map_err(|e| format!("cannot open config directory {}: {e}", parent.display()))?;
+        directory
+            .sync_all()
+            .map_err(|e| format!("cannot sync config directory {}: {e}", parent.display()))?;
+    }
+    Ok(())
 }
 
 pub fn default_config_path(home: &Path) -> PathBuf {
@@ -199,6 +431,10 @@ fn request(
     let mut command = Command::new("curl");
     command.args([
         "-sS",
+        "--connect-timeout",
+        "10",
+        "--max-time",
+        "60",
         "-X",
         method,
         "-H",
@@ -379,10 +615,197 @@ mod tests {
 
     #[test]
     fn config_defaults_optional_fields() {
-        let c: Config = serde_json::from_str(r#"{"hub_url":"https://hub","handle":"k"}"#).unwrap();
+        let c: Config = serde_json::from_str(r#"{"handle":"k"}"#).unwrap();
+        assert!(c.hub_url.is_empty());
         assert!(c.pits.is_empty());
+        assert!(c.relationships.is_empty());
         assert!(c.backfilled_pits.is_empty());
         assert!(c.secret.is_none());
+
+        for raw in [
+            r#"{"hub_url":null}"#,
+            r#"{"handle":null}"#,
+            r#"{"pits":null}"#,
+            r#"{"relationships":null}"#,
+            r#"{"backfilled_pits":null}"#,
+        ] {
+            assert!(serde_json::from_str::<Config>(raw).is_err());
+        }
+    }
+
+    #[test]
+    fn backfill_marker_requires_the_submitted_identity_and_hub() {
+        let fixture = ConfigFixture::new("backfill-match");
+        let expected = Config::update(&fixture.path, |config| {
+            config.hub_url = "https://old.example".into();
+            config.handle = "kevin".into();
+            config.secret = Some("secret".into());
+            config.machine_id = Some("machine".into());
+            config.pits.push("pit_one".into());
+            Ok(())
+        })
+        .unwrap();
+
+        Config::update(&fixture.path, |config| {
+            config.hub_url = "https://new.example".into();
+            config.relationships.push("rel_keep".into());
+            Ok(())
+        })
+        .unwrap();
+        assert!(
+            Config::append_backfill_marker_if_matches(&fixture.path, &expected, "pit_one").is_err()
+        );
+
+        let config = Config::load(&fixture.path).unwrap();
+        assert!(config.backfilled_pits.is_empty());
+        assert_eq!(config.relationships, ["rel_keep"]);
+    }
+
+    #[test]
+    fn config_update_preserves_unknown_fields_and_private_permissions() {
+        let fixture = ConfigFixture::new("preserve");
+        std::fs::write(
+            &fixture.path,
+            r#"{"hub_url":"https://hub","handle":"k","future":{"enabled":true}}"#,
+        )
+        .unwrap();
+
+        Config::append_pit(&fixture.path, "pit_one").unwrap();
+        Config::append_pit(&fixture.path, "pit_one").unwrap();
+        Config::append_relationship(&fixture.path, "rel_one").unwrap();
+        Config::append_relationship(&fixture.path, "rel_one").unwrap();
+        Config::append_backfill_marker(&fixture.path, "pit_one").unwrap();
+        Config::append_backfill_marker(&fixture.path, "pit_one").unwrap();
+
+        let config = Config::load(&fixture.path).unwrap();
+        assert_eq!(config.pits, ["pit_one"]);
+        assert_eq!(config.relationships, ["rel_one"]);
+        assert_eq!(config.backfilled_pits, ["pit_one"]);
+        assert_eq!(config.extra["future"]["enabled"], true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::PermissionsExt;
+            let mode = std::fs::metadata(&fixture.path)
+                .unwrap()
+                .permissions()
+                .mode()
+                & 0o777;
+            assert_eq!(mode, 0o600);
+        }
+    }
+
+    #[test]
+    fn config_update_never_replaces_malformed_json() {
+        let fixture = ConfigFixture::new("malformed");
+        let original = b"{broken";
+        std::fs::write(&fixture.path, original).unwrap();
+
+        let error = Config::update(&fixture.path, |config| {
+            config.pits.push("pit_one".into());
+            Ok(())
+        })
+        .unwrap_err();
+
+        assert!(error.contains("invalid config"));
+        assert_eq!(std::fs::read(&fixture.path).unwrap(), original);
+    }
+
+    #[test]
+    fn config_update_serializes_writers_within_process() {
+        let fixture = ConfigFixture::new("same-process");
+        let first_path = fixture.path.clone();
+        let first = std::thread::spawn(move || {
+            Config::update(&first_path, |config| {
+                config.pits.push("pit_one".into());
+                std::thread::sleep(std::time::Duration::from_millis(200));
+                Ok(())
+            })
+            .unwrap();
+        });
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        Config::update(&fixture.path, |config| {
+            config.relationships.push("rel_one".into());
+            Ok(())
+        })
+        .unwrap();
+        first.join().unwrap();
+
+        let config = Config::load(&fixture.path).unwrap();
+        assert_eq!(config.pits, ["pit_one"]);
+        assert_eq!(config.relationships, ["rel_one"]);
+    }
+
+    #[test]
+    fn config_update_serializes_writers_across_processes() {
+        let fixture = ConfigFixture::new("concurrent");
+        let executable = std::env::current_exe().unwrap();
+        let test_name = "social::tests::config_writer_helper";
+
+        let mut first = Command::new(&executable)
+            .args(["--exact", test_name, "--nocapture"])
+            .env("BRRRN_CONFIG_WRITER_PATH", &fixture.path)
+            .env("BRRRN_CONFIG_WRITER_FIELD", "pit")
+            .env("BRRRN_CONFIG_WRITER_SLEEP_MS", "200")
+            .spawn()
+            .unwrap();
+        std::thread::sleep(std::time::Duration::from_millis(50));
+        let mut second = Command::new(&executable)
+            .args(["--exact", test_name, "--nocapture"])
+            .env("BRRRN_CONFIG_WRITER_PATH", &fixture.path)
+            .env("BRRRN_CONFIG_WRITER_FIELD", "relationship")
+            .spawn()
+            .unwrap();
+
+        assert!(first.wait().unwrap().success());
+        assert!(second.wait().unwrap().success());
+        let config = Config::load(&fixture.path).unwrap();
+        assert_eq!(config.pits, ["pit_one"]);
+        assert_eq!(config.relationships, ["rel_one"]);
+    }
+
+    #[test]
+    fn config_writer_helper() {
+        let Some(path) = std::env::var_os("BRRRN_CONFIG_WRITER_PATH") else {
+            return;
+        };
+        let field = std::env::var("BRRRN_CONFIG_WRITER_FIELD").unwrap();
+        let sleep_ms = std::env::var("BRRRN_CONFIG_WRITER_SLEEP_MS")
+            .ok()
+            .and_then(|value| value.parse().ok())
+            .unwrap_or(0);
+        Config::update(Path::new(&path), |config| {
+            match field.as_str() {
+                "pit" => config.pits.push("pit_one".into()),
+                "relationship" => config.relationships.push("rel_one".into()),
+                _ => panic!("unknown writer field"),
+            }
+            std::thread::sleep(std::time::Duration::from_millis(sleep_ms));
+            Ok(())
+        })
+        .unwrap();
+    }
+
+    struct ConfigFixture {
+        directory: PathBuf,
+        path: PathBuf,
+    }
+
+    impl ConfigFixture {
+        fn new(label: &str) -> Self {
+            static NEXT: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(0);
+            let id = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let directory = std::env::temp_dir()
+                .join(format!("brrrn-config-{label}-{}-{id}", std::process::id()));
+            std::fs::create_dir_all(&directory).unwrap();
+            let path = directory.join("config.json");
+            Self { directory, path }
+        }
+    }
+
+    impl Drop for ConfigFixture {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.directory);
+        }
     }
 
     #[test]

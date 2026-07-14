@@ -99,12 +99,37 @@ final class BrrrnCoreTests: XCTestCase {
         XCTAssertEqual(board.rankedMembers.map(\.handle), ["alpha", "beta", "low"])
     }
 
-    func testConfigParsesCLIShapeAndDefaultsPits() throws {
-        let data = #"{"hub_url":"https://hub.example","handle":"kevin","secret":"s","machine_id":"m","pits":["one","two"],"backfilled_pits":["one"]}"#.data(using: .utf8)!
+    func testConfigParsesCLIShapeAndPreservesSharedFields() throws {
+        let data = #"{"hub_url":"https://hub.example","handle":"kevin","secret":"s","machine_id":"m","pits":["one","two"],"relationships":["rel_one"],"backfilled_pits":["one"],"future":{"enabled":true}}"#.data(using: .utf8)!
         let config = try BrrrnConfig.load(from: data)
         XCTAssertEqual(config.hubURL, "https://hub.example")
         XCTAssertEqual(config.handle, "kevin")
         XCTAssertEqual(config.pits, ["one", "two"])
+        XCTAssertEqual(config.relationships, ["rel_one"])
+        XCTAssertEqual(config.backfilledPits, ["one"])
+
+        let encoded = try JSONEncoder().encode(config)
+        let object = try XCTUnwrap(JSONSerialization.jsonObject(with: encoded) as? [String: Any])
+        XCTAssertEqual((object["future"] as? [String: Bool])?["enabled"], true)
+    }
+
+    func testConfigDefaultsMissingKnownFieldsButRejectsNullKnownFields() throws {
+        let missing = try BrrrnConfig.load(from: Data("{}".utf8))
+        XCTAssertEqual(missing.hubURL, "")
+        XCTAssertEqual(missing.handle, "")
+        XCTAssertEqual(missing.pits, [])
+        XCTAssertEqual(missing.relationships, [])
+        XCTAssertEqual(missing.backfilledPits, [])
+
+        for json in [
+            #"{"hub_url":null}"#,
+            #"{"handle":null}"#,
+            #"{"pits":null}"#,
+            #"{"relationships":null}"#,
+            #"{"backfilled_pits":null}"#,
+        ] {
+            XCTAssertThrowsError(try BrrrnConfig.load(from: Data(json.utf8)))
+        }
     }
 
     func testConfigPathEnvironmentOverride() {

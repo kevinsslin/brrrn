@@ -260,7 +260,7 @@ fn load_config(cli: &Cli) -> Result<(Config, PathBuf), String> {
 }
 
 fn run_config(cli: &Cli, action: &ConfigAction) -> Result<(), String> {
-    let (mut config, path) = load_config(cli)?;
+    let (config, path) = load_config(cli)?;
     match action {
         ConfigAction::SetHub { url } => {
             if !(url.starts_with("https://")
@@ -269,16 +269,20 @@ fn run_config(cli: &Cli, action: &ConfigAction) -> Result<(), String> {
             {
                 return Err("hub URL must use https (localhost may use http)".to_string());
             }
-            config.hub_url = url.trim_end_matches('/').to_string();
-            config.save(&path)?;
-            println!("hub set to {}", config.hub_url);
+            let hub_url = url.trim_end_matches('/').to_string();
+            Config::update(&path, |latest| {
+                latest.hub_url = hub_url.clone();
+                Ok(())
+            })?;
+            println!("hub set to {hub_url}");
         }
         ConfigAction::Show => {
-            let mut value = serde_json::to_value(&config).map_err(|e| e.to_string())?;
-            if value["secret"].is_string() {
-                value["secret"] = serde_json::Value::String("<redacted>".to_string());
+            let mut display = config.clone();
+            display.extra.clear();
+            if display.secret.is_some() {
+                display.secret = Some("<redacted>".to_string());
             }
-            println!("{}", serde_json::to_string_pretty(&value).unwrap());
+            println!("{}", serde_json::to_string_pretty(&display).unwrap());
         }
     }
     Ok(())
@@ -308,36 +312,42 @@ fn pit_new(cli: &Cli, name: Option<&str>) -> Result<(), String> {
 }
 
 fn pit_join(cli: &Cli, code: &str, handle: &str) -> Result<(), String> {
-    let (mut config, path) = load_config(cli)?;
-    let hub = config.hub()?.to_string();
+    let path = config_path(cli);
     let normalized = handle.to_lowercase();
-    if !config.handle.is_empty() && config.handle != normalized {
-        return Err(format!(
-            "this client already uses handle '{}'; one handle per client",
-            config.handle
-        ));
-    }
-    let secret = config.secret.clone().unwrap_or(social::random_hex(24)?);
-    let machine = config.machine_id.clone().unwrap_or(social::random_hex(12)?);
-    let url = format!("{hub}/pit/{code}/join");
-    let response: OkResponse = social::post(
-        &url,
-        &serde_json::json!({
-            "handle": normalized,
-            "secret": secret,
-        }),
-    )?;
-    if !response.ok {
-        return Err("hub did not accept the join".to_string());
-    }
-    config.handle = normalized;
-    config.secret = Some(secret);
-    config.machine_id = Some(machine);
-    if !config.pits.iter().any(|p| p == code) {
-        config.pits.push(code.to_string());
-    }
-    config.save(&path)?;
-    println!("joined pit {code} as {}", config.handle);
+    let generated_secret = social::random_hex(24)?;
+    let generated_machine = social::random_hex(12)?;
+    let joined = Config::update(&path, |config| {
+        let hub = config.hub()?.to_string();
+        if !config.handle.is_empty() && config.handle != normalized {
+            return Err(format!(
+                "this client already uses handle '{}'; one handle per client",
+                config.handle
+            ));
+        }
+        config.handle = normalized.clone();
+        if config.secret.is_none() {
+            config.secret = Some(generated_secret);
+        }
+        if config.machine_id.is_none() {
+            config.machine_id = Some(generated_machine);
+        }
+        let secret = config.secret.as_deref().unwrap();
+        let response: OkResponse = social::post(
+            &format!("{hub}/pit/{code}/join"),
+            &serde_json::json!({
+                "handle": config.handle.as_str(),
+                "secret": secret,
+            }),
+        )?;
+        if !response.ok {
+            return Err("hub did not accept the join".to_string());
+        }
+        if !config.pits.iter().any(|pit| pit == code) {
+            config.pits.push(code.to_string());
+        }
+        Ok(())
+    })?;
+    println!("joined pit {code} as {}", joined.handle);
     println!("run `brrrn submit` to backfill your history");
     Ok(())
 }
@@ -393,7 +403,7 @@ fn pit_show(cli: &Cli, handle: &str, requested: Option<&str>) -> Result<(), Stri
 }
 
 fn run_submit(cli: &Cli) -> Result<(), String> {
-    let (mut config, path) = load_config(cli)?;
+    let (config, path) = load_config(cli)?;
     let hub = config.hub()?.to_string();
     let (handle, secret, machine) = config.identity()?;
     let handle = handle.to_string();
@@ -441,15 +451,12 @@ fn run_submit(cli: &Cli) -> Result<(), String> {
                 &serde_json::json!({ "handle": handle, "secret": secret, "machine_id": machine, "days": [] }),
             )?;
         }
-        if !config.backfilled_pits.contains(&code) {
-            config.backfilled_pits.push(code.clone());
-        }
+        Config::append_backfill_marker_if_matches(&path, &config, &code)?;
         println!(
             "submitted {stored} UTC day{} to {code}",
             if stored == 1 { "" } else { "s" }
         );
     }
-    config.save(&path)?;
     Ok(())
 }
 
