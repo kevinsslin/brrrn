@@ -57,6 +57,9 @@ public struct UTCActivityGrid: Sendable, Equatable {
     ) {
         let calendar = BurnReport.DailyEntry.utcCalendar
         let weekCount = max(1, weeks)
+        let effectiveThreshold = thresholdUSD.isFinite && thresholdUSD > 0
+            ? thresholdUSD
+            : StreakPolicy.defaultThresholdUSD
         let endDay = calendar.startOfDay(for: end)
         let weekday = calendar.component(.weekday, from: endDay)
         let daysSinceMonday = (weekday + 5) % 7
@@ -71,10 +74,10 @@ public struct UTCActivityGrid: Sendable, Equatable {
 
         var streakDates = Set<String>()
         var cursor = endDay
-        if (values[Self.dateKey(cursor)]?.cost ?? 0) < thresholdUSD {
+        if (values[Self.dateKey(cursor)]?.cost ?? 0) < effectiveThreshold {
             cursor = calendar.date(byAdding: .day, value: -1, to: cursor)!
         }
-        while (values[Self.dateKey(cursor)]?.cost ?? 0) >= thresholdUSD {
+        while (values[Self.dateKey(cursor)]?.cost ?? 0) >= effectiveThreshold {
             streakDates.insert(Self.dateKey(cursor))
             cursor = calendar.date(byAdding: .day, value: -1, to: cursor)!
         }
@@ -88,14 +91,14 @@ public struct UTCActivityGrid: Sendable, Equatable {
             let cost = value?.cost ?? 0
             let tokens = value?.tokens ?? 0
             let future = day > endDay
-            let level = Self.level(cost: cost, threshold: thresholdUSD, isFuture: future)
+            let level = Self.level(cost: cost, threshold: effectiveThreshold, isFuture: future)
             let status = Self.status(
                 cost: cost,
                 tokens: tokens,
                 hasRecord: value != nil,
                 isFuture: future,
                 isCurrentStreak: streakDates.contains(key),
-                threshold: thresholdUSD
+                threshold: effectiveThreshold
             )
             built.append(DailyActivityCell(
                 date: day,
@@ -114,7 +117,7 @@ public struct UTCActivityGrid: Sendable, Equatable {
 
         cells = built
         self.weeks = weekCount
-        self.thresholdUSD = thresholdUSD
+        self.thresholdUSD = effectiveThreshold
         currentStreakDays = streakDates.count
         startDate = firstDay
         endDate = endDay

@@ -101,6 +101,21 @@ final class DailyActivityTests: XCTestCase {
         XCTAssertEqual(level("2026-07-14", in: grid), .veryHigh)
     }
 
+    func testInvalidThresholdFallsBackToDefaultPolicy() {
+        for threshold in [0, -1, .infinity, .nan] {
+            let grid = UTCActivityGrid(
+                entries: [entry("2026-07-14", cost: 6)],
+                weeks: 1,
+                endingAt: utcDate(2026, 7, 14),
+                thresholdUSD: threshold
+            )
+
+            XCTAssertEqual(grid.thresholdUSD, StreakPolicy.defaultThresholdUSD)
+            XCTAssertEqual(grid.currentStreakDays, 1)
+            XCTAssertEqual(cell("2026-07-14", in: grid).status, .currentStreak)
+        }
+    }
+
     private func cell(_ date: String, in grid: UTCActivityGrid) -> DailyActivityCell {
         grid.cells.first(where: { $0.dateKey == date })!
     }

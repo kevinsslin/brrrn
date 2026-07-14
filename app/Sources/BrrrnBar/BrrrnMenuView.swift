@@ -1,5 +1,4 @@
 import SwiftUI
-import Charts
 import BrrrnCore
 
 struct BrrrnMenuView: View {
@@ -24,6 +23,20 @@ struct BrrrnMenuView: View {
             ScrollView {
                 VStack(alignment: .leading, spacing: 18) {
                     MeHeader(report: model.report)
+                    if let report = model.report {
+                        if let daily = report.daily {
+                            DailyHeatmap(
+                                title: "BURN CALENDAR",
+                                grid: UTCActivityGrid(
+                                    entries: daily,
+                                    weeks: 12,
+                                    thresholdUSD: report.streak?.thresholdUSD ?? StreakPolicy.defaultThresholdUSD
+                                )
+                            )
+                        } else {
+                            BurnCalendarUnavailable()
+                        }
+                    }
                     Divider()
                     ModelSection(models: model.weekModels)
                     Divider()
@@ -81,6 +94,22 @@ private struct MeHeader: View {
                 Text("Waiting for brrrn...")
                     .foregroundStyle(.secondary)
             }
+        }
+    }
+}
+
+private struct BurnCalendarUnavailable: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Text("BURN CALENDAR")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(1.1)
+            Label("Daily history unavailable", systemImage: "calendar.badge.exclamationmark")
+                .font(.callout.weight(.medium))
+            Text("The selected brrrn engine does not provide daily history.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
         }
     }
 }
@@ -381,10 +410,6 @@ private struct MemberDetailView: View {
     let selection: AppModel.Selection
     let isLoading: Bool
     let back: () -> Void
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var hoveredDate: Date?
-
-    private var series: [DailyPoint] { selection.detail.series(days: 14) }
 
     var body: some View {
         VStack(spacing: 0) {
@@ -409,92 +434,18 @@ private struct MemberDetailView: View {
                         Stat(label: "THIS MONTH", value: selection.member.monthUSD)
                     }
 
-                    VStack(alignment: .leading, spacing: 8) {
-                        HStack {
-                            Text("LAST 14 UTC DAYS")
-                                .font(.caption.weight(.semibold))
-                                .foregroundStyle(.secondary)
-                                .tracking(1.1)
-                            Spacer()
-                            if let hoveredDate,
-                               let point = series.min(by: { abs($0.date.timeIntervalSince(hoveredDate)) < abs($1.date.timeIntervalSince(hoveredDate)) }) {
-                                Text("\(point.date.formatted(.dateTime.month(.abbreviated).day()))  \(Format.money(point.costUSD))")
-                                    .font(.caption.weight(.semibold))
-                                    .monospacedDigit()
-                            }
-                        }
-                        Chart(series) { point in
-                            BarMark(
-                                x: .value("Day", point.date, unit: .day),
-                                y: .value("Cost", point.costUSD),
-                                width: .ratio(0.72)
-                            )
-                            .foregroundStyle(BrrrnPalette.chart(colorScheme))
-                            .cornerRadius(4)
-                            if let hoveredDate,
-                               BurnReport.DailyEntry.utcCalendar.isDate(point.date, inSameDayAs: hoveredDate) {
-                                RuleMark(x: .value("Selected", point.date, unit: .day))
-                                    .foregroundStyle(.secondary.opacity(0.45))
-                            }
-                        }
-                        .chartYAxis {
-                            AxisMarks(position: .leading, values: .automatic(desiredCount: 3)) { value in
-                                AxisGridLine().foregroundStyle(.quaternary)
-                                AxisValueLabel {
-                                    if let amount = value.as(Double.self) {
-                                        Text(Format.money(amount)).font(.caption2)
-                                    }
-                                }
-                            }
-                        }
-                        .chartXAxis {
-                            AxisMarks(values: .stride(by: .day, count: 4)) { value in
-                                AxisValueLabel(format: .dateTime.day())
-                            }
-                        }
-                        .chartOverlay { proxy in
-                            GeometryReader { geometry in
-                                Rectangle()
-                                    .fill(.clear)
-                                    .contentShape(Rectangle())
-                                    .onContinuousHover { phase in
-                                        switch phase {
-                                        case .active(let location):
-                                            if let plotFrame = proxy.plotFrame {
-                                                let plotX = location.x - geometry[plotFrame].origin.x
-                                                hoveredDate = proxy.value(atX: plotX, as: Date.self)
-                                            }
-                                        case .ended:
-                                            hoveredDate = nil
-                                        }
-                                    }
-                            }
-                        }
-                        .frame(height: 210)
-                    }
+                    DailyHeatmap(
+                        title: "16-WEEK BURN CALENDAR",
+                        grid: UTCActivityGrid(
+                            entries: selection.detail.days,
+                            weeks: 16,
+                            thresholdUSD: selection.detail.effectiveStreakThresholdUSD
+                        )
+                    )
 
                     if let top = selection.member.topModel {
                         LabeledContent("Top model this week", value: top)
                             .font(.callout)
-                    }
-                    LabeledContent("Streak", value: "\(selection.member.streakDays) days ≥ $5")
-                        .font(.callout)
-
-                    VStack(alignment: .leading, spacing: 6) {
-                        Text("DAILY TABLE")
-                            .font(.caption.weight(.semibold))
-                            .foregroundStyle(.secondary)
-                            .tracking(1.1)
-                        ForEach(selection.detail.days.suffix(14), id: \.date) { day in
-                            HStack {
-                                Text(day.date).foregroundStyle(.secondary)
-                                Spacer()
-                                Text(Format.tokens(day.tokens)).foregroundStyle(.secondary)
-                                Text(Format.money(day.costUSD)).frame(width: 82, alignment: .trailing)
-                            }
-                            .font(.caption)
-                            .monospacedDigit()
-                        }
                     }
                 }
                 .padding(18)
