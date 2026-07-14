@@ -86,18 +86,16 @@ private struct MeHeader: View {
 }
 
 private struct SourceValue: View {
-    @Environment(\.colorScheme) private var colorScheme
     let name: String
     let value: Double
     let source: String
 
     var body: some View {
-        HStack(spacing: 5) {
-            Circle()
-                .fill(source == "claude" ? BrrrnPalette.claude(colorScheme) : BrrrnPalette.codex(colorScheme))
-                .frame(width: 7, height: 7)
+        HStack(spacing: 6) {
+            ProviderMark(provider: ModelPresentation(source: source, speed: nil).provider)
             Text("\(name) \(Format.money(value))")
         }
+        .accessibilityElement(children: .combine)
     }
 }
 
@@ -124,34 +122,62 @@ private struct ModelSection: View {
 }
 
 private struct ModelRow: View {
-    @Environment(\.colorScheme) private var colorScheme
-    @State private var showDetail = false
+    @State private var isHovered = false
+    @State private var isPinned = false
     let model: BurnReport.ModelUsage
 
-    var sourceColor: Color {
-        model.source == "claude-code" ? BrrrnPalette.claude(colorScheme) : BrrrnPalette.codex(colorScheme)
+    private var presentation: ModelPresentation { model.presentation }
+
+    private var detailPresented: Binding<Bool> {
+        Binding(
+            get: { isHovered || isPinned },
+            set: { value in
+                if !value {
+                    isHovered = false
+                    isPinned = false
+                }
+            }
+        )
     }
 
     var body: some View {
-        HStack(spacing: 9) {
-            Circle().fill(sourceColor).frame(width: 7, height: 7)
-            Text(model.model)
-                .font(.callout)
-                .lineLimit(1)
-            Spacer()
-            Text(model.costUSD.map(Format.money) ?? "n/a")
-                .font(.callout.weight(.semibold))
-                .monospacedDigit()
+        Button { isPinned.toggle() } label: {
+            HStack(spacing: 9) {
+                ProviderMark(provider: presentation.provider, size: 13)
+                VStack(alignment: .leading, spacing: 3) {
+                    Text(model.model)
+                        .font(.callout)
+                        .lineLimit(1)
+                    Text(presentation.variantLabel)
+                        .font(.caption2.weight(.medium))
+                        .foregroundStyle(.secondary)
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 2)
+                        .background(.quaternary, in: Capsule())
+                }
+                Spacer(minLength: 8)
+                Text(model.costUSD.map(Format.money) ?? "n/a")
+                    .font(.callout.weight(.semibold))
+                    .monospacedDigit()
+            }
+            .contentShape(Rectangle())
         }
-        .contentShape(Rectangle())
-        .onHover { showDetail = $0 }
-        .popover(isPresented: $showDetail, arrowEdge: .trailing) {
+        .buttonStyle(.plain)
+        .onHover { isHovered = $0 }
+        .onExitCommand { isPinned = false }
+        .accessibilityLabel("\(presentation.provider.accessibilityName), \(model.model), \(presentation.variantLabel), \(model.costUSD.map(Format.money) ?? "cost unavailable")")
+        .accessibilityHint("Shows token details")
+        .popover(isPresented: detailPresented, arrowEdge: .trailing) {
             TokenDetail(
                 title: model.model,
-                input: model.inputTokens + (model.cacheReadTokens ?? 0) + (model.cacheWriteTokens ?? 0),
+                input: model.inputTokens,
+                cacheRead: model.cacheReadTokens,
+                cacheWrite: model.cacheWriteTokens,
                 output: model.outputTokens,
+                reasoning: model.reasoningTokens,
+                total: model.totalTokens,
                 cost: model.costUSD,
-                subtitle: model.speed
+                subtitle: presentation.variantLabel
             )
         }
     }
@@ -160,7 +186,11 @@ private struct ModelRow: View {
 private struct TokenDetail: View {
     let title: String
     let input: Int
+    var cacheRead: Int? = nil
+    var cacheWrite: Int? = nil
     let output: Int
+    var reasoning: Int? = nil
+    var total: Int? = nil
     let cost: Double?
     let subtitle: String?
 
@@ -168,13 +198,30 @@ private struct TokenDetail: View {
         VStack(alignment: .leading, spacing: 8) {
             Text(title).font(.headline)
             if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
-            LabeledContent("Input", value: Format.tokens(input))
-            LabeledContent("Output", value: Format.tokens(output))
             LabeledContent("Cost", value: cost.map(Format.money) ?? "n/a")
+                .font(.callout.weight(.semibold))
+            Divider()
+            LabeledContent("Input", value: Format.tokens(input))
+            if let cacheRead, cacheRead > 0 {
+                LabeledContent("Cache read", value: Format.tokens(cacheRead))
+            }
+            if let cacheWrite, cacheWrite > 0 {
+                LabeledContent("Cache write", value: Format.tokens(cacheWrite))
+            }
+            LabeledContent("Output", value: Format.tokens(output))
+            if let reasoning, reasoning > 0 {
+                LabeledContent("Reasoning", value: Format.tokens(reasoning))
+                Text("Reasoning is included in output totals.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            if let total {
+                LabeledContent("Total", value: Format.tokens(total))
+            }
         }
         .monospacedDigit()
         .padding(14)
-        .frame(minWidth: 220)
+        .frame(minWidth: 230)
     }
 }
 
