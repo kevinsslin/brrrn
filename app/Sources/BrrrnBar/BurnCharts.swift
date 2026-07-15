@@ -224,22 +224,26 @@ struct BurnRhythmChart: View {
 
     private var chart: some View {
         Chart {
+            // Today is the filled series; the typical profile is a step
+            // line, so neither can bury the other regardless of which is
+            // larger at a given hour.
             ForEach(0..<24, id: \.self) { hour in
                 BarMark(
                     x: .value("Hour", hour),
-                    y: .value("Typical", rhythm.typicalByHour[hour]),
+                    y: .value("Today", rhythm.todayByHour[hour]),
                     width: .fixed(7)
                 )
-                .foregroundStyle(Color.secondary.opacity(hour == selectedHour ? 0.55 : 0.32))
+                .foregroundStyle(accent.opacity(hour == selectedHour ? 1 : 0.82))
                 .cornerRadius(2)
-
-                BarMark(
+            }
+            ForEach(0..<24, id: \.self) { hour in
+                LineMark(
                     x: .value("Hour", hour),
-                    y: .value("Today", rhythm.todayByHour[hour]),
-                    width: .fixed(3)
+                    y: .value("Typical", rhythm.typicalByHour[hour])
                 )
-                .foregroundStyle(accent.opacity(hour == selectedHour ? 1 : 0.9))
-                .cornerRadius(1.5)
+                .interpolationMethod(.stepCenter)
+                .foregroundStyle(Color.secondary.opacity(0.7))
+                .lineStyle(StrokeStyle(lineWidth: 1.5))
             }
         }
         .chartXScale(domain: -0.5...23.5)
@@ -312,9 +316,9 @@ struct BurnRhythmChart: View {
                 Text("Today")
             }
             HStack(spacing: 4) {
-                RoundedRectangle(cornerRadius: 1.5)
-                    .fill(Color.secondary.opacity(0.35))
-                    .frame(width: 8, height: 8)
+                RoundedRectangle(cornerRadius: 1)
+                    .fill(Color.secondary.opacity(0.7))
+                    .frame(width: 10, height: 2)
                 Text("Typical avg")
                 if let lookbackDays {
                     RangePicker(selection: lookbackDays, options: [7, 30, 90])

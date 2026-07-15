@@ -40,6 +40,11 @@ public enum Format {
         utcFormatter("EEEE, MMMM d, yyyy").string(from: date) + " UTC"
     }
 
+    /// "Wed, Jul 15" for tight detail panels.
+    public static func utcShortDate(_ date: Date) -> String {
+        utcFormatter("EEE, MMM d").string(from: date)
+    }
+
     public static func utcMonthDay(_ date: Date) -> String {
         utcFormatter("MMM d").string(from: date)
     }

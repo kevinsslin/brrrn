@@ -35,14 +35,28 @@ struct DailyHeatmap: View {
 
     private var calendar: some View {
         VStack(alignment: .leading, spacing: compact ? 6 : 8) {
-            if !compact {
+            if compact {
+                // The grid only needs ~200pt, so the selected/hovered day's
+                // detail lives beside it instead of in a full-width strip
+                // that duplicated the ME header whenever today was selected.
+                HStack(alignment: .top, spacing: 14) {
+                    VStack(alignment: .leading, spacing: 6) {
+                        monthLabels
+                        HStack(alignment: .top, spacing: 7) {
+                            weekdayLabels
+                            heatmapGrid
+                        }
+                    }
+                    detailPanel
+                }
+            } else {
                 header
-            }
-            detailStrip
-            monthLabels
-            HStack(alignment: .top, spacing: 7) {
-                weekdayLabels
-                heatmapGrid
+                detailStrip
+                monthLabels
+                HStack(alignment: .top, spacing: 7) {
+                    weekdayLabels
+                    heatmapGrid
+                }
             }
             legend
         }
@@ -89,12 +103,6 @@ struct DailyHeatmap: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
-            if compact {
-                Label("\(grid.currentStreakDays)d", systemImage: "flame.fill")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.orange)
-                    .padding(.trailing, 2)
-            }
             VStack(alignment: .trailing, spacing: 2) {
                 Text(Format.money(selectedCell.costUSD))
                     .font(.callout.weight(.semibold))
@@ -105,6 +113,30 @@ struct DailyHeatmap: View {
             .monospacedDigit()
         }
         .frame(minHeight: compact ? 30 : 36)
+    }
+
+    private var detailPanel: some View {
+        VStack(alignment: .leading, spacing: 4) {
+            Text(Format.utcShortDate(selectedCell.date) + (selectedCell.isToday ? " (today)" : ""))
+                .font(.caption.weight(.semibold))
+                .lineLimit(1)
+            Text(Format.money(selectedCell.costUSD))
+                .font(.callout.weight(.bold))
+                .monospacedDigit()
+            Text("\(Format.tokens(selectedCell.tokens)) tokens")
+                .font(.caption2)
+                .foregroundStyle(.secondary)
+                .monospacedDigit()
+            Text(statusText(selectedCell))
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.bottom, 2)
+            Label("\(grid.currentStreakDays)d streak", systemImage: "flame.fill")
+                .font(.caption2.weight(.semibold))
+                .foregroundStyle(.orange)
+        }
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 
     private var monthLabels: some View {

@@ -200,7 +200,7 @@ private struct AnalyticsSection: View {
                     RecordsView(records: BurnAnalytics.records(entries: daily, thresholdUSD: thresholdUSD))
                 }
             }
-            .frame(minHeight: 196, alignment: .topLeading)
+            .frame(minHeight: 169, alignment: .topLeading)
         }
     }
 }
