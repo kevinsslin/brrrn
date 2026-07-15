@@ -40,6 +40,7 @@ struct BrrrnMenuView: View {
                 .padding(.bottom, 2)
             if rootTabRaw == "pits" && !snapshotMode {
                 ScrollView { sections }
+                    .onAppear { Task { await model.refreshPitsIfStale() } }
             } else {
                 // The Me page fits the window: only the by-model list
                 // scrolls, internally, so the menu never shows an outer bar.
@@ -518,6 +519,11 @@ private struct PitSections: View {
                         .font(.caption.weight(.semibold))
                         .foregroundStyle(.secondary)
                         .tracking(1.2)
+                    if let synced = model.lastPitRefresh {
+                        Text("synced \(Format.relativeTime(from: synced))")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
                     Spacer()
                     RenameButton(model: model)
                     Button(action: openSetup) {

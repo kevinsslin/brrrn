@@ -102,13 +102,19 @@ struct PitSetupView: View {
                     sample: "night shift"
                 )
             } else {
-                labeledField(
-                    label: "INVITE OR CODE",
-                    placeholder: "ember-fox-7k2m or code@hub",
-                    text: $code,
-                    sample: "ember-fox-7k2m",
-                    monospaced: true
-                )
+                VStack(alignment: .leading, spacing: 4) {
+                    labeledField(
+                        label: "INVITE FROM YOUR FRIEND",
+                        placeholder: "paste it here",
+                        text: $code,
+                        sample: "ember-fox-7k2m",
+                        monospaced: true
+                    )
+                    Text("Paste exactly what they sent: the whole invite (code@hub) or just the code if you already use the same hub.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
             }
 
             if let lockedHandle {

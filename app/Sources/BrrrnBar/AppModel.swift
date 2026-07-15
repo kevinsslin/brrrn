@@ -38,7 +38,7 @@ final class AppModel: ObservableObject {
     private var watcher: DirectoryWatcher?
     private var debounceTask: Task<Void, Never>?
     private var refreshLoop: Task<Void, Never>?
-    private var lastPitRefresh: Date?
+    @Published private(set) var lastPitRefresh: Date?
     private var started = false
 
     var menuBarTitle: String? {
@@ -213,6 +213,15 @@ final class AppModel: ObservableObject {
                 binary: binary, code: code, handle: handle, displayName: displayName
             )
         }
+        await refresh(forcePit: true)
+    }
+
+    /// Called when the Pits tab comes into view: pull a fresh board unless
+    /// one was fetched in the last minute, so the page never shows numbers
+    /// that are minutes old right when someone looks at them.
+    func refreshPitsIfStale() async {
+        let age = lastPitRefresh.map { Date().timeIntervalSince($0) } ?? .infinity
+        guard age > 60 else { return }
         await refresh(forcePit: true)
     }
 
