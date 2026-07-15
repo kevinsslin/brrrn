@@ -47,6 +47,29 @@ public enum LocalEngine {
         _ = try await run(binary: binary, arguments: ["submit"])
     }
 
+    /// `brrrn pit new [--name <name>]`, returning the freshly minted code.
+    public static func createPit(binary: String, name: String?) async throws -> String {
+        var arguments = ["pit", "new"]
+        if let name, !name.isEmpty {
+            arguments.append(contentsOf: ["--name", name])
+        }
+        let data = try await run(binary: binary, arguments: arguments)
+        let output = String(data: data, encoding: .utf8) ?? ""
+        guard let line = output.split(separator: "\n").first(where: { $0.hasPrefix("created pit: ") }),
+              case let code = line.dropFirst("created pit: ".count).trimmingCharacters(in: .whitespaces),
+              !code.isEmpty
+        else {
+            throw EngineError.emptyOutput
+        }
+        return code
+    }
+
+    /// `brrrn pit join <code> --as <handle>`; the CLI claims the handle and
+    /// persists the secret/machine ID into the shared config.
+    public static func joinPit(binary: String, code: String, handle: String) async throws {
+        _ = try await run(binary: binary, arguments: ["pit", "join", code, "--as", handle])
+    }
+
     private static func run(binary: String, arguments: [String]) async throws -> Data {
         try await withCheckedThrowingContinuation { continuation in
             DispatchQueue.global(qos: .userInitiated).async {

@@ -18,6 +18,8 @@ struct BrrrnMenuView: View {
         .background(.background)
     }
 
+    @State private var showPitSetup = false
+
     private var mainContent: some View {
         VStack(spacing: 0) {
             ScrollView {
@@ -36,11 +38,14 @@ struct BrrrnMenuView: View {
                     Divider()
                     ModelSection(models: model.weekModels)
                     Divider()
-                    PitSections(model: model)
+                    PitSections(model: model) { showPitSetup = true }
                 }
                 .padding(18)
             }
-            Footer(model: model)
+            Footer(model: model) { showPitSetup = true }
+        }
+        .sheet(isPresented: $showPitSetup) {
+            PitSetupSheet(model: model)
         }
         .overlay {
             if model.report == nil && model.isRefreshing {
@@ -100,6 +105,8 @@ private struct AnalyticsSection: View {
 
     @AppStorage("analyticsTab") private var tabRaw = AnalyticsTab.calendar.rawValue
     @AppStorage("rhythmUsesUTC") private var rhythmUsesUTC = false
+    @AppStorage("trendDays") private var trendDays = 30
+    @AppStorage("rhythmLookback") private var rhythmLookback = 30
 
     private enum AnalyticsTab: String, CaseIterable {
         case calendar
@@ -139,7 +146,11 @@ private struct AnalyticsSection: View {
                 .labelsHidden()
                 .controlSize(.small)
 
+                if tab == .trend {
+                    RangePicker(selection: $trendDays, options: [14, 30, 90])
+                }
                 if tab == .rhythm {
+                    RangePicker(selection: $rhythmLookback, options: [7, 30, 90])
                     Button {
                         rhythmUsesUTC.toggle()
                     } label: {
@@ -166,11 +177,15 @@ private struct AnalyticsSection: View {
                 )
             case .trend:
                 BurnTrendChart(
-                    points: BurnAnalytics.trend(entries: daily, days: 30),
+                    points: BurnAnalytics.trend(entries: daily, days: trendDays),
                     streakThresholdUSD: thresholdUSD
                 )
             case .rhythm:
-                let rhythm = BurnAnalytics.rhythm(entries: daily, timeZone: rhythmTimeZone)
+                let rhythm = BurnAnalytics.rhythm(
+                    entries: daily,
+                    lookbackDays: rhythmLookback,
+                    timeZone: rhythmTimeZone
+                )
                 if rhythm.hasData {
                     BurnRhythmChart(rhythm: rhythm, timeZone: rhythmTimeZone)
                 } else {
@@ -180,6 +195,37 @@ private struct AnalyticsSection: View {
                 RecordsView(records: BurnAnalytics.records(entries: daily, thresholdUSD: thresholdUSD))
             }
         }
+    }
+}
+
+private struct RangePicker: View {
+    @Binding var selection: Int
+    let options: [Int]
+
+    var body: some View {
+        Menu {
+            ForEach(options, id: \.self) { days in
+                Button {
+                    selection = days
+                } label: {
+                    if days == selection {
+                        Label("\(days)d", systemImage: "checkmark")
+                    } else {
+                        Text("\(days)d")
+                    }
+                }
+            }
+        } label: {
+            Text("\(selection)d")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.quaternary, in: Capsule())
+        }
+        .menuStyle(.borderlessButton)
+        .menuIndicator(.hidden)
+        .fixedSize()
+        .help("Change the window")
     }
 }
 
@@ -467,6 +513,7 @@ private struct TokenDetail: View {
 
 private struct PitSections: View {
     @ObservedObject var model: AppModel
+    let openSetup: () -> Void
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
@@ -479,13 +526,15 @@ private struct PitSections: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                FriendsEmptyState()
+                FriendsEmptyState(openSetup: openSetup)
             }
         }
     }
 }
 
 private struct FriendsEmptyState: View {
+    let openSetup: () -> Void
+
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
             Text("FRIENDS")
@@ -494,52 +543,16 @@ private struct FriendsEmptyState: View {
                 .tracking(1.2)
             Text("Your crew isn't here yet")
                 .font(.callout.weight(.medium))
-            Text("One of you starts the fire, everyone else joins with the code it prints.")
+            Text("One of you starts a pit, everyone else joins with its code.")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .fixedSize(horizontal: false, vertical: true)
-            CommandRow(label: "Start a pit", command: "brrrn pit new")
-            CommandRow(label: "Join one", command: "brrrn pit join <code> --as <you>")
-        }
-    }
-}
-
-private struct CommandRow: View {
-    let label: String
-    let command: String
-
-    @State private var copied = false
-
-    var body: some View {
-        HStack(spacing: 8) {
-            Text(label)
-                .font(.caption)
-                .foregroundStyle(.secondary)
-                .frame(width: 66, alignment: .leading)
-            Text(command)
-                .font(.caption.monospaced())
-                .lineLimit(1)
-                .textSelection(.enabled)
-            Spacer(minLength: 4)
-            Button {
-                NSPasteboard.general.clearContents()
-                NSPasteboard.general.setString(command, forType: .string)
-                copied = true
-                Task { @MainActor in
-                    try? await Task.sleep(for: .seconds(1.5))
-                    copied = false
-                }
-            } label: {
-                Image(systemName: copied ? "checkmark" : "doc.on.doc")
-                    .font(.caption2)
-                    .foregroundStyle(copied ? .green : .secondary)
+            Button(action: openSetup) {
+                Label("Start or join a pit", systemImage: "person.2.fill")
+                    .frame(maxWidth: .infinity)
             }
-            .buttonStyle(.plain)
-            .help("Copy command")
+            .controlSize(.large)
         }
-        .padding(.horizontal, 8)
-        .padding(.vertical, 5)
-        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -636,6 +649,7 @@ private struct MemberRow: View {
 
 private struct Footer: View {
     @ObservedObject var model: AppModel
+    let openSetup: () -> Void
 
     var body: some View {
         VStack(spacing: 0) {
@@ -651,6 +665,11 @@ private struct Footer: View {
                     .foregroundStyle(.secondary)
                 Spacer()
                 if model.isRefreshing { ProgressView().controlSize(.small) }
+                Button(action: openSetup) {
+                    Image(systemName: "person.badge.plus")
+                }
+                .buttonStyle(.plain)
+                .help("Start or join a pit")
                 Button { Task { await model.refresh(forcePit: true) } } label: {
                     Image(systemName: "arrow.clockwise")
                 }

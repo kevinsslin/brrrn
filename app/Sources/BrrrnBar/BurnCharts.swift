@@ -209,6 +209,10 @@ struct BurnRhythmChart: View {
         .frame(minHeight: 36)
     }
 
+    private var maxValue: Double {
+        max(rhythm.todayByHour.max() ?? 0, rhythm.typicalByHour.max() ?? 0)
+    }
+
     private var chart: some View {
         Chart {
             ForEach(0..<24, id: \.self) { hour in
@@ -230,8 +234,12 @@ struct BurnRhythmChart: View {
             }
         }
         .chartXScale(domain: -0.5...23.5)
+        // Square-root scale, fitted to the data: burn is spiky, and on a
+        // linear axis one $1,000 hour flattens every normal hour into
+        // unreadable slivers.
+        .chartYScale(domain: 0...max(1, maxValue * 1.05), type: .squareRoot)
         .chartYAxis {
-            AxisMarks(position: .trailing, values: .automatic(desiredCount: 3)) { value in
+            AxisMarks(position: .trailing, values: yAxisValues) { value in
                 AxisGridLine().foregroundStyle(.quaternary)
                 AxisValueLabel {
                     if let cost = value.as(Double.self) {
@@ -277,6 +285,13 @@ struct BurnRhythmChart: View {
         }
         .frame(height: 96)
         .accessibilityLabel(accessibilitySummary)
+    }
+
+    /// Hand-picked marks that stay legible on the square-root scale: zero,
+    /// a low reference near the typical range, and the peak.
+    private var yAxisValues: [Double] {
+        let top = max(1, maxValue * 1.05)
+        return [0, top / 16, top / 4, top]
     }
 
     private var legend: some View {
