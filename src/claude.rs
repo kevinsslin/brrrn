@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::agg::{Entry, Source, Usage};
 use crate::hash::stable_hash;
-use crate::windows::parse_date;
+use crate::windows::parse_date_hour;
 
 /// Scan one Claude Code session file (~/.claude/projects/**/*.jsonl). Each
 /// assistant message line carries a `message.usage` block with token counts,
@@ -94,7 +94,7 @@ pub fn scan_file(
             seen.remove(&hash);
             continue;
         }
-        let Some(date) = parse_date(v["timestamp"].as_str(), utc) else {
+        let Some((date, hour)) = parse_date_hour(v["timestamp"].as_str(), utc) else {
             seen.remove(&hash);
             continue;
         };
@@ -103,6 +103,7 @@ pub fn scan_file(
         local_claims.insert(hash);
         entries.push(Entry {
             date,
+            hour,
             source: Source::Claude,
             model: model.to_string(),
             speed: usage["speed"].as_str().unwrap_or("standard").to_string(),

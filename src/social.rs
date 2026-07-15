@@ -557,6 +557,7 @@ mod tests {
         agg.add_entry(
             &Entry {
                 date: date.parse().unwrap(),
+                hour: 0,
                 source,
                 model: model.into(),
                 speed: "standard".into(),

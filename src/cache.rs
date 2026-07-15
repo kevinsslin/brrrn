@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agg::{Entry, Source, Usage};
 
-const CACHE_VERSION: u32 = 4;
+const CACHE_VERSION: u32 = 5;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fingerprint {
@@ -35,6 +35,7 @@ pub struct CachedFile {
 #[derive(Serialize, Deserialize, Clone)]
 struct CachedEntry {
     date: String,
+    hour: u8,
     source: u8,
     model: String,
     speed: String,
@@ -162,17 +163,18 @@ pub fn fingerprint(path: &Path) -> Option<Fingerprint> {
 }
 
 fn condense(entries: &[Entry]) -> Vec<Entry> {
-    let mut grouped: BTreeMap<(NaiveDate, Source, String, String), Usage> = BTreeMap::new();
+    let mut grouped: BTreeMap<(NaiveDate, u8, Source, String, String), Usage> = BTreeMap::new();
     for e in entries {
         grouped
-            .entry((e.date, e.source, e.model.clone(), e.speed.clone()))
+            .entry((e.date, e.hour, e.source, e.model.clone(), e.speed.clone()))
             .or_default()
             .add(&e.usage);
     }
     grouped
         .into_iter()
-        .map(|((date, source, model, speed), usage)| Entry {
+        .map(|((date, hour, source, model, speed), usage)| Entry {
             date,
+            hour,
             source,
             model,
             speed,
@@ -185,6 +187,7 @@ impl CachedEntry {
     fn from_entry(e: Entry) -> Self {
         Self {
             date: e.date.to_string(),
+            hour: e.hour,
             source: e.source.as_u8(),
             model: e.model,
             speed: e.speed,
@@ -195,6 +198,7 @@ impl CachedEntry {
     fn to_entry(&self) -> Option<Entry> {
         Some(Entry {
             date: self.date.parse().ok()?,
+            hour: self.hour.min(23),
             source: Source::from_u8(self.source)?,
             model: self.model.clone(),
             speed: self.speed.clone(),
@@ -210,6 +214,7 @@ mod tests {
     fn entry(date: &str, model: &str, input: u64) -> Entry {
         Entry {
             date: date.parse().unwrap(),
+            hour: 0,
             source: Source::Claude,
             model: model.into(),
             speed: "standard".into(),

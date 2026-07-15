@@ -4,7 +4,7 @@ use std::path::Path;
 
 use crate::agg::{Entry, Source, Usage};
 use crate::hash::stable_hash;
-use crate::windows::parse_date;
+use crate::windows::parse_date_hour;
 
 #[derive(Clone, Copy, Default, PartialEq)]
 struct Totals {
@@ -124,7 +124,7 @@ pub fn scan_file(
             seen.remove(&hash);
             continue;
         }
-        let Some(date) = parse_date(v["timestamp"].as_str(), utc) else {
+        let Some((date, hour)) = parse_date_hour(v["timestamp"].as_str(), utc) else {
             seen.remove(&hash);
             continue;
         };
@@ -133,6 +133,7 @@ pub fn scan_file(
         local_claims.insert(hash);
         entries.push(Entry {
             date,
+            hour,
             source: Source::Codex,
             model: cur_model.clone().unwrap_or_else(|| "unknown".to_string()),
             speed: cur_effort.clone(),

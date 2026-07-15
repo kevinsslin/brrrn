@@ -89,6 +89,7 @@ impl Usage {
 #[derive(Clone, Debug)]
 pub struct Entry {
     pub date: NaiveDate,
+    pub hour: u8, // 0-23, same timezone as `date`
     pub source: Source,
     pub model: String,
     pub speed: String, // claude: speed field; codex: reasoning effort
@@ -118,10 +119,18 @@ pub struct DayModel {
     pub priced: bool,
 }
 
+/// Per-hour rollup that feeds the time-of-day rhythm view.
+#[derive(Default, Clone, Copy)]
+pub struct HourAgg {
+    pub tokens: u64,
+    pub cost: f64,
+}
+
 #[derive(Default)]
 pub struct Agg {
     pub by_key: HashMap<Key, (Usage, Option<f64>)>,
     pub daily: BTreeMap<NaiveDate, BTreeMap<Source, DayAgg>>,
+    pub hourly: BTreeMap<NaiveDate, [HourAgg; 24]>,
     pub daily_models: BTreeMap<NaiveDate, BTreeMap<String, DayModel>>,
     /// Always spans full history, even when the report itself is date-filtered.
     pub streak_daily_cost: BTreeMap<NaiveDate, f64>,
@@ -171,6 +180,13 @@ impl Agg {
             None => day.unpriced_tokens += e.usage.total(),
         }
 
+        let hour = &mut self
+            .hourly
+            .entry(e.date)
+            .or_insert_with(|| [HourAgg::default(); 24])[usize::from(e.hour.min(23))];
+        hour.tokens += e.usage.total();
+        hour.cost += cost.unwrap_or(0.0);
+
         let dm = self
             .daily_models
             .entry(e.date)
@@ -199,6 +215,7 @@ mod tests {
     fn entry(date: &str, model: &str, usage: Usage) -> Entry {
         Entry {
             date: date.parse().unwrap(),
+            hour: 0,
             source: Source::Claude,
             model: model.to_string(),
             speed: "standard".to_string(),
@@ -241,6 +258,39 @@ mod tests {
         assert_eq!(dm.input, 2 * 3000); // input + cache tiers
         assert_eq!(dm.output, 200);
         assert!(dm.priced);
+    }
+
+    #[test]
+    fn hourly_rollup_buckets_cost_and_tokens_by_hour() {
+        let mut agg = Agg::default();
+        let p = Price {
+            input: 1e-6,
+            output: 5e-6,
+            cache_read: 1e-7,
+            cache_w5m: 1.25e-6,
+            cache_w1h: 2e-6,
+        };
+        let u = Usage {
+            input: 1000,
+            output: 100,
+            ..Default::default()
+        };
+        let mut early = entry("2026-07-13", "m", u);
+        early.hour = 9;
+        let mut late = entry("2026-07-13", "m", u);
+        late.hour = 23;
+        agg.add_entry(&early, Some(p));
+        agg.add_entry(&early, Some(p));
+        agg.add_entry(&late, Some(p));
+
+        let hours = &agg.hourly[&"2026-07-13".parse().unwrap()];
+        let per_entry = 1000.0 * 1e-6 + 100.0 * 5e-6;
+        assert_eq!(hours[9].tokens, 2200);
+        assert!((hours[9].cost - 2.0 * per_entry).abs() < 1e-12);
+        assert_eq!(hours[23].tokens, 1100);
+        assert!((hours[23].cost - per_entry).abs() < 1e-12);
+        assert_eq!(hours[0].tokens, 0);
+        assert_eq!(hours[0].cost, 0.0);
     }
 
     #[test]

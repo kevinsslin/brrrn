@@ -160,6 +160,7 @@ mod tests {
             .into_iter()
             .map(|d| Entry {
                 date: d.parse().unwrap(),
+                hour: 0,
                 source: Source::Claude,
                 model: "m".to_string(),
                 speed: "standard".to_string(),

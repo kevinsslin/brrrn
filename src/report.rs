@@ -197,11 +197,16 @@ pub fn json_value(agg: &Agg, period: &str, today: NaiveDate, utc: bool) -> serde
         .daily
         .iter()
         .map(|(day, per_source)| {
-            serde_json::json!({
+            let mut entry = serde_json::json!({
                 "date": day.to_string(),
                 "tokens": per_source.values().map(|d| d.tokens).sum::<u64>(),
                 "cost_usd": per_source.values().map(|d| d.cost).sum::<f64>(),
-            })
+            });
+            if let Some(hours) = agg.hourly.get(day) {
+                entry["hours"] = hours.iter().map(|h| h.cost).collect();
+                entry["hour_tokens"] = hours.iter().map(|h| h.tokens).collect();
+            }
+            entry
         })
         .collect();
     serde_json::json!({
@@ -266,6 +271,7 @@ mod tests {
             agg.add_entry(
                 &Entry {
                     date,
+                    hour: 0,
                     source: Source::Claude,
                     model: model.into(),
                     speed: "standard".into(),

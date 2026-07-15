@@ -1,4 +1,4 @@
-use chrono::{DateTime, Datelike, Duration, Local, NaiveDate};
+use chrono::{DateTime, Datelike, Duration, Local, NaiveDate, Timelike};
 use std::collections::BTreeMap;
 
 /// Streak: consecutive UTC days with burn at or above this floor. $10 punishes
@@ -35,11 +35,19 @@ pub fn streak_days(daily_cost: &BTreeMap<NaiveDate, f64>, today: NaiveDate, thre
 /// Bucket a timestamp into a calendar day, in UTC (leaderboard-comparable)
 /// or the machine's local timezone.
 pub fn parse_date(ts: Option<&str>, utc: bool) -> Option<NaiveDate> {
+    parse_date_hour(ts, utc).map(|(date, _)| date)
+}
+
+/// Bucket a timestamp into (calendar day, hour of day 0-23), in the same
+/// timezone the day itself is bucketed in.
+pub fn parse_date_hour(ts: Option<&str>, utc: bool) -> Option<(NaiveDate, u8)> {
     let dt = DateTime::parse_from_rfc3339(ts?).ok()?;
     Some(if utc {
-        dt.naive_utc().date()
+        let naive = dt.naive_utc();
+        (naive.date(), naive.hour() as u8)
     } else {
-        dt.with_timezone(&Local).date_naive()
+        let local = dt.with_timezone(&Local);
+        (local.date_naive(), local.hour() as u8)
     })
 }
 
@@ -95,6 +103,20 @@ mod tests {
     #[test]
     fn empty_history_is_zero() {
         assert_eq!(streak_days(&BTreeMap::new(), d("2026-07-14"), 5.0), 0);
+    }
+
+    #[test]
+    fn parse_date_hour_matches_day_timezone() {
+        assert_eq!(
+            parse_date_hour(Some("2026-07-13T23:30:00.000Z"), true),
+            Some((d("2026-07-13"), 23))
+        );
+        // Local bucketing keeps day and hour in the same timezone.
+        if let Some((date, hour)) = parse_date_hour(Some("2026-07-13T23:30:00.000Z"), false) {
+            let expected = parse_date(Some("2026-07-13T23:30:00.000Z"), false).unwrap();
+            assert_eq!(date, expected);
+            assert!(hour < 24);
+        }
     }
 
     #[test]
