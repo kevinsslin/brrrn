@@ -165,9 +165,12 @@ struct BurnTrendChart: View {
 /// day. Two series, so both are named in the inline legend.
 struct BurnRhythmChart: View {
     let rhythm: BurnRhythm
+    let timeZone: TimeZone
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedHour: Int?
+
+    private var zoneLabel: String { Format.timeZoneLabel(timeZone) }
 
     private var accent: Color { BrrrnPalette.heatmap(.high, colorScheme) }
 
@@ -187,7 +190,7 @@ struct BurnRhythmChart: View {
     private var readout: some View {
         HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(shownHour.map { String(format: "%02d:00-%02d:59 UTC", $0, $0) } ?? "No data")
+                Text(shownHour.map { String(format: "%02d:00-%02d:59 \(zoneLabel)", $0, $0) } ?? "No data")
                     .font(.caption.weight(.medium))
                 Text(selectedHour == nil ? "Typical peak hour" : "Hovered hour")
                     .font(.caption2)
@@ -291,7 +294,7 @@ struct BurnRhythmChart: View {
                 Text("Typical (\(rhythm.activeDays)d avg)")
             }
             Spacer()
-            Text("UTC hours")
+            Text("\(zoneLabel) hours")
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -301,7 +304,7 @@ struct BurnRhythmChart: View {
         guard let peak = rhythm.peakTypicalHour else {
             return "Burn rhythm by hour. No recent hourly data."
         }
-        return "Burn rhythm by hour. Typical peak at \(peak):00 UTC, "
+        return "Burn rhythm by hour. Typical peak at \(peak):00 \(zoneLabel), "
             + "\(Format.money(rhythm.typicalByHour[peak])) on an average day."
     }
 }

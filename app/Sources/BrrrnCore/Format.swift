@@ -48,10 +48,30 @@ public enum Format {
         utcFormatter("MMM").string(from: date)
     }
 
+    /// "Jul 15, 13:00" in the given timezone, for hour-level records.
+    public static func monthDayHour(_ date: Date, in timeZone: TimeZone) -> String {
+        formatter("MMM d, HH:mm", in: timeZone).string(from: date)
+    }
+
+    public static func monthDay(_ date: Date, in timeZone: TimeZone) -> String {
+        formatter("MMM d", in: timeZone).string(from: date)
+    }
+
+    /// Short zone label for chart captions: "UTC", or "GMT+8" style for
+    /// everything else.
+    public static func timeZoneLabel(_ timeZone: TimeZone) -> String {
+        if timeZone.secondsFromGMT() == 0 { return "UTC" }
+        return timeZone.abbreviation() ?? timeZone.identifier
+    }
+
     private static func utcFormatter(_ format: String) -> DateFormatter {
+        formatter(format, in: TimeZone(identifier: "UTC") ?? .gmt)
+    }
+
+    private static func formatter(_ format: String, in timeZone: TimeZone) -> DateFormatter {
         let formatter = DateFormatter()
         formatter.locale = Locale(identifier: "en_US_POSIX")
-        formatter.timeZone = TimeZone(identifier: "UTC")
+        formatter.timeZone = timeZone
         formatter.dateFormat = format
         return formatter
     }

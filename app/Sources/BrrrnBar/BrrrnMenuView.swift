@@ -99,17 +99,20 @@ private struct AnalyticsSection: View {
     let thresholdUSD: Double
 
     @AppStorage("analyticsTab") private var tabRaw = AnalyticsTab.calendar.rawValue
+    @AppStorage("rhythmUsesUTC") private var rhythmUsesUTC = false
 
     private enum AnalyticsTab: String, CaseIterable {
         case calendar
         case trend
         case rhythm
+        case records
 
         var label: String {
             switch self {
             case .calendar: "Calendar"
             case .trend: "Trend"
             case .rhythm: "Rhythm"
+            case .records: "Records"
             }
         }
     }
@@ -118,16 +121,38 @@ private struct AnalyticsSection: View {
         AnalyticsTab(rawValue: tabRaw) ?? .calendar
     }
 
+    /// Personal rhythm reads in the viewer's clock; anything compared with
+    /// friends stays UTC. The toggle exists for people who think in UTC.
+    private var rhythmTimeZone: TimeZone {
+        rhythmUsesUTC ? (TimeZone(identifier: "UTC") ?? .gmt) : .current
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Picker("Analytics view", selection: $tabRaw) {
-                ForEach(AnalyticsTab.allCases, id: \.rawValue) { tab in
-                    Text(tab.label).tag(tab.rawValue)
+            HStack(spacing: 8) {
+                Picker("Analytics view", selection: $tabRaw) {
+                    ForEach(AnalyticsTab.allCases, id: \.rawValue) { tab in
+                        Text(tab.label).tag(tab.rawValue)
+                    }
+                }
+                .pickerStyle(.segmented)
+                .labelsHidden()
+                .controlSize(.small)
+
+                if tab == .rhythm {
+                    Button {
+                        rhythmUsesUTC.toggle()
+                    } label: {
+                        Text(rhythmUsesUTC ? "UTC" : Format.timeZoneLabel(.current))
+                            .font(.caption2.weight(.semibold))
+                            .padding(.horizontal, 6)
+                            .padding(.vertical, 3)
+                            .background(.quaternary, in: Capsule())
+                    }
+                    .buttonStyle(.plain)
+                    .help("Switch the rhythm clock between your timezone and UTC")
                 }
             }
-            .pickerStyle(.segmented)
-            .labelsHidden()
-            .controlSize(.small)
 
             switch tab {
             case .calendar:
@@ -145,14 +170,110 @@ private struct AnalyticsSection: View {
                     streakThresholdUSD: thresholdUSD
                 )
             case .rhythm:
-                let rhythm = BurnAnalytics.rhythm(entries: daily)
+                let rhythm = BurnAnalytics.rhythm(entries: daily, timeZone: rhythmTimeZone)
                 if rhythm.hasData {
-                    BurnRhythmChart(rhythm: rhythm)
+                    BurnRhythmChart(rhythm: rhythm, timeZone: rhythmTimeZone)
                 } else {
                     RhythmUnavailable()
                 }
+            case .records:
+                RecordsView(records: BurnAnalytics.records(entries: daily, thresholdUSD: thresholdUSD))
             }
         }
+    }
+}
+
+private struct RecordsView: View {
+    let records: BurnRecords
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Text("PERSONAL RECORDS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(1.2)
+
+            if records.bestHour == nil && records.bestDay == nil && records.longestStreakDays == 0 {
+                Text("Burn something first")
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .frame(minHeight: 96)
+            } else {
+                if let hour = records.bestHour {
+                    RecordRow(
+                        icon: "bolt.fill",
+                        title: "Biggest hour",
+                        value: Format.money(hour.costUSD),
+                        detail: Format.monthDayHour(hour.date, in: .current)
+                            + " \(Format.timeZoneLabel(.current))",
+                        isCurrent: hour.isCurrent
+                    )
+                }
+                if let day = records.bestDay {
+                    RecordRow(
+                        icon: "sun.max.fill",
+                        title: "Biggest day",
+                        value: Format.money(day.costUSD),
+                        detail: Format.utcMonthDay(day.date) + " UTC",
+                        isCurrent: day.isCurrent
+                    )
+                }
+                if records.longestStreakDays > 0 {
+                    RecordRow(
+                        icon: "flame.fill",
+                        title: "Longest streak",
+                        value: "\(records.longestStreakDays)d",
+                        detail: records.longestStreakEnd.map {
+                            records.longestStreakIsCurrent
+                                ? "still going"
+                                : "ended \(Format.utcMonthDay($0)) UTC"
+                        } ?? "",
+                        isCurrent: records.longestStreakIsCurrent
+                    )
+                }
+                Text("Day and streak records use UTC days, the same clock the pit board ranks on.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+            }
+        }
+    }
+}
+
+private struct RecordRow: View {
+    let icon: String
+    let title: String
+    let value: String
+    let detail: String
+    let isCurrent: Bool
+
+    var body: some View {
+        HStack(spacing: 9) {
+            Image(systemName: icon)
+                .font(.callout)
+                .foregroundStyle(.orange)
+                .frame(width: 18)
+            VStack(alignment: .leading, spacing: 2) {
+                Text(title)
+                    .font(.callout)
+                Text(detail)
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
+            Spacer(minLength: 8)
+            if isCurrent {
+                Text("PR NOW")
+                    .font(.caption2.weight(.bold))
+                    .foregroundStyle(.orange)
+                    .padding(.horizontal, 6)
+                    .padding(.vertical, 2)
+                    .background(.orange.opacity(0.15), in: Capsule())
+            }
+            Text(value)
+                .font(.callout.weight(.semibold))
+                .monospacedDigit()
+        }
+        .accessibilityElement(children: .combine)
+        .accessibilityLabel("\(title), \(value), \(detail)\(isCurrent ? ", record in progress" : "")")
     }
 }
 
