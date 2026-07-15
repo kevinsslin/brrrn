@@ -6,6 +6,7 @@ struct BrrrnBarApp: App {
     @StateObject private var model = AppModel()
 
     init() {
+        ScreenshotGenerator.runIfRequested()
         NSApplication.shared.setActivationPolicy(.accessory)
     }
 

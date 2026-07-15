@@ -256,7 +256,7 @@ public enum BurnAnalytics {
         return instants
     }
 
-    static func calendar(in timeZone: TimeZone) -> Calendar {
+    public static func calendar(in timeZone: TimeZone) -> Calendar {
         var calendar = Calendar(identifier: .gregorian)
         calendar.timeZone = timeZone
         return calendar

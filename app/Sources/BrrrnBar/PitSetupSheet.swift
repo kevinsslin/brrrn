@@ -6,6 +6,9 @@ import BrrrnCore
 /// stays in the CLI, which this drives.
 struct PitSetupSheet: View {
     @ObservedObject var model: AppModel
+    /// Screenshot generator: AppKit-backed text fields cannot offscreen-
+    /// render, so this swaps them for static lookalikes.
+    var snapshotMode = false
     @Environment(\.dismiss) private var dismiss
 
     private enum Mode: String, CaseIterable {
@@ -55,19 +58,15 @@ struct PitSetupSheet: View {
                 .foregroundStyle(.secondary)
                 .tracking(1.2)
 
-            Picker("Mode", selection: $mode) {
-                ForEach(Mode.allCases, id: \.self) { Text($0.rawValue) }
-            }
-            .pickerStyle(.segmented)
-            .labelsHidden()
+            TabStrip(
+                selection: $mode,
+                options: Mode.allCases.map { ($0, $0.rawValue) }
+            )
 
             if mode == .create {
-                TextField("Pit name (optional)", text: $pitName)
-                    .textFieldStyle(.roundedBorder)
+                field("Pit name (optional)", text: $pitName, sample: "night shift")
             } else {
-                TextField("Join code, like ember-fox-7k2m", text: $code)
-                    .textFieldStyle(.roundedBorder)
-                    .font(.body.monospaced())
+                field("Join code, like ember-fox-7k2m", text: $code, sample: "ember-fox-7k2m", monospaced: true)
             }
 
             if let lockedHandle {
@@ -75,8 +74,7 @@ struct PitSetupSheet: View {
                     .font(.callout)
                     .help("This machine already burns as \(lockedHandle); one handle per client.")
             } else {
-                TextField("Your handle", text: $handle)
-                    .textFieldStyle(.roundedBorder)
+                field("Your handle", text: $handle, sample: "mitsuha")
             }
 
             if let errorText {
@@ -107,6 +105,30 @@ struct PitSetupSheet: View {
                 .font(.caption2)
                 .foregroundStyle(.tertiary)
                 .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    @ViewBuilder
+    private func field(
+        _ placeholder: String,
+        text: Binding<String>,
+        sample: String,
+        monospaced: Bool = false
+    ) -> some View {
+        if snapshotMode {
+            Text(sample)
+                .font(monospaced ? .body.monospaced() : .body)
+                .padding(.horizontal, 8)
+                .padding(.vertical, 5)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
+        } else if monospaced {
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
+                .font(.body.monospaced())
+        } else {
+            TextField(placeholder, text: text)
+                .textFieldStyle(.roundedBorder)
         }
     }
 

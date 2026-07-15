@@ -3,12 +3,19 @@ import BrrrnCore
 
 struct BrrrnMenuView: View {
     @ObservedObject var model: AppModel
+    /// ImageRenderer does not lay out ScrollView content; the screenshot
+    /// generator flips this to render the sections in a plain stack.
+    var snapshotMode = false
     @Environment(\.colorScheme) private var colorScheme
 
     var body: some View {
         Group {
             if let selection = model.selection {
-                MemberDetailView(selection: selection, isLoading: model.isLoadingMember) {
+                MemberDetailView(
+                    selection: selection,
+                    isLoading: model.isLoadingMember,
+                    snapshotMode: snapshotMode
+                ) {
                     model.closeMember()
                 }
             } else {
@@ -22,25 +29,10 @@ struct BrrrnMenuView: View {
 
     private var mainContent: some View {
         VStack(spacing: 0) {
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
-                    MeHeader(report: model.report)
-                    if let report = model.report {
-                        if let daily = report.daily {
-                            AnalyticsSection(
-                                daily: daily,
-                                thresholdUSD: report.streak?.thresholdUSD ?? StreakPolicy.defaultThresholdUSD
-                            )
-                        } else {
-                            BurnCalendarUnavailable()
-                        }
-                    }
-                    Divider()
-                    ModelSection(models: model.weekModels)
-                    Divider()
-                    PitSections(model: model) { showPitSetup = true }
-                }
-                .padding(18)
+            if snapshotMode {
+                sections
+            } else {
+                ScrollView { sections }
             }
             Footer(model: model) { showPitSetup = true }
         }
@@ -54,6 +46,28 @@ struct BrrrnMenuView: View {
                     .background(.regularMaterial, in: RoundedRectangle(cornerRadius: 12))
             }
         }
+    }
+
+    private var sections: some View {
+        VStack(alignment: .leading, spacing: 18) {
+            MeHeader(report: model.report)
+            if let report = model.report {
+                if let daily = report.daily {
+                    AnalyticsSection(
+                        daily: daily,
+                        thresholdUSD: report.streak?.thresholdUSD ?? StreakPolicy.defaultThresholdUSD
+                    )
+                } else {
+                    BurnCalendarUnavailable()
+                }
+            }
+            Divider()
+            ModelSection(models: model.weekModels)
+            Divider()
+            PitSections(model: model) { showPitSetup = true }
+        }
+        .padding(18)
+        .frame(maxHeight: .infinity, alignment: .top)
     }
 }
 
@@ -137,14 +151,10 @@ private struct AnalyticsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             HStack(spacing: 8) {
-                Picker("Analytics view", selection: $tabRaw) {
-                    ForEach(AnalyticsTab.allCases, id: \.rawValue) { tab in
-                        Text(tab.label).tag(tab.rawValue)
-                    }
-                }
-                .pickerStyle(.segmented)
-                .labelsHidden()
-                .controlSize(.small)
+                TabStrip(
+                    selection: $tabRaw,
+                    options: AnalyticsTab.allCases.map { ($0.rawValue, $0.label) }
+                )
 
                 if tab == .trend {
                     RangePicker(selection: $trendDays, options: [14, 30, 90])
@@ -203,18 +213,9 @@ private struct RangePicker: View {
     let options: [Int]
 
     var body: some View {
-        Menu {
-            ForEach(options, id: \.self) { days in
-                Button {
-                    selection = days
-                } label: {
-                    if days == selection {
-                        Label("\(days)d", systemImage: "checkmark")
-                    } else {
-                        Text("\(days)d")
-                    }
-                }
-            }
+        Button {
+            let index = options.firstIndex(of: selection) ?? 0
+            selection = options[(index + 1) % options.count]
         } label: {
             Text("\(selection)d")
                 .font(.caption2.weight(.semibold))
@@ -222,10 +223,8 @@ private struct RangePicker: View {
                 .padding(.vertical, 3)
                 .background(.quaternary, in: Capsule())
         }
-        .menuStyle(.borderlessButton)
-        .menuIndicator(.hidden)
-        .fixedSize()
-        .help("Change the window")
+        .buttonStyle(.plain)
+        .help("Cycle the window: \(options.map { "\($0)d" }.joined(separator: " / "))")
     }
 }
 
@@ -690,6 +689,7 @@ private struct Footer: View {
 private struct MemberDetailView: View {
     let selection: AppModel.Selection
     let isLoading: Bool
+    var snapshotMode = false
     let back: () -> Void
 
     var body: some View {
@@ -711,8 +711,22 @@ private struct MemberDetailView: View {
             .padding(14)
             Divider()
 
-            ScrollView {
-                VStack(alignment: .leading, spacing: 18) {
+            detailScroll
+        }
+        .overlay { if isLoading { ProgressView() } }
+    }
+
+    @ViewBuilder
+    private var detailScroll: some View {
+        if snapshotMode {
+            detailContent.frame(maxHeight: .infinity, alignment: .top)
+        } else {
+            ScrollView { detailContent }
+        }
+    }
+
+    private var detailContent: some View {
+        VStack(alignment: .leading, spacing: 18) {
                     HStack(spacing: 22) {
                         Stat(label: "TODAY", value: selection.member.todayUSD)
                         Stat(label: "THIS WEEK", value: selection.member.weekUSD)
@@ -728,15 +742,12 @@ private struct MemberDetailView: View {
                         )
                     )
 
-                    if let top = selection.member.topModel {
-                        LabeledContent("Top model this week", value: top)
-                            .font(.callout)
-                    }
-                }
-                .padding(18)
+            if let top = selection.member.topModel {
+                LabeledContent("Top model this week", value: top)
+                    .font(.callout)
             }
         }
-        .overlay { if isLoading { ProgressView() } }
+        .padding(18)
     }
 }
 

@@ -36,8 +36,11 @@ final class AppModel: ObservableObject {
         Array(ModelSort.byCostDescending(weekReport?.byModel ?? []).prefix(8))
     }
 
+    /// Fixture injection for the screenshot generator; nil in normal runs.
+    var configOverride: BrrrnConfig?
+
     var config: BrrrnConfig? {
-        BrrrnConfig.loadDefault()
+        configOverride ?? BrrrnConfig.loadDefault()
     }
 
     func start() {

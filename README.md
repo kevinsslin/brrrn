@@ -1,105 +1,91 @@
-# brrrn
+# brrrn 🔥
 
-**WHOOP for token burn.** See the API-value cost of every token you burn in
-Claude Code and Codex, then compare today, this week, and this month with a
-private group of friends.
+**WHOOP for token burn.** A tiny native macOS menu bar app (plus CLI) that
+shows the API-value cost of every token you burn in Claude Code and Codex,
+then lets a private crew of friends compare today, this week, and this month.
 
-No global leaderboard. No accounts. No prompts leave your Mac.
+No global leaderboard. No accounts. No prompts ever leave your Mac.
 
-**Ultralight: about 891 KB compressed and 2.4 MB installed.**
+[![CI](https://github.com/kevinsslin/brrrn/actions/workflows/ci.yml/badge.svg)](https://github.com/kevinsslin/brrrn/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-orange.svg)](LICENSE)
+![Platform](https://img.shields.io/badge/platform-macOS%2014%2B-blue)
+![Download size](https://img.shields.io/badge/download-~1.2MB-brightgreen)
 
-## Ultralight by design
+## What it looks like
 
-brrrn is deliberately tiny. The current clean Apple Silicon release build
-measures:
+| Burn calendar + crew board | 30-day trend | Hour-of-day rhythm |
+|:--:|:--:|:--:|
+| ![Burn calendar, weekly model costs, and the private pit board](docs/screenshots/menu-calendar.png) | ![30-day burn trend with crosshair readout](docs/screenshots/menu-trend.png) | ![Today's burn per hour against your typical day, in your timezone](docs/screenshots/menu-rhythm.png) |
 
-| Artifact | Size |
-|---|---:|
-| Compressed app download | **891 KB** |
-| Installed `BrrrnBar.app` | **2.4 MB** |
-| Embedded Rust CLI | 1.31 MB |
-| Native SwiftUI binary | 1.07 MB |
-| Tracked source code | 221 KB |
+| Personal records | Friend drill-down | Join a crew in-app |
+|:--:|:--:|:--:|
+| ![Gym-style PRs: biggest hour, biggest day, longest streak](docs/screenshots/menu-records.png) | ![A friend's 16-week burn calendar and weekly stats](docs/screenshots/member-detail.png) | ![Start or join a pit without touching a terminal](docs/screenshots/pit-setup.png) |
 
-These are measured release artifacts, not estimates. Build caches are larger,
-but they are never shipped. CI enforces a 2 MB compressed-download budget so
-future releases stay ultralight.
+Screenshots are rendered from the real views with demo data and stay in sync
+with the code: `cd app && swift build && .build/debug/BrrrnBar --screenshots
+../docs/screenshots`.
 
-Reproduce the measurement locally:
+## Why
+
+Existing tools answer "how much quota do I have left" or "how much did I
+spend, alone, in a terminal". Nobody does the social loop: seeing your
+friends' daily burn the way WHOOP shows a team's recovery scores. Burn is a
+flex, not a worry. brrrn is built around that emotion:
+
+- **Me**: today / this week / this month, Claude vs Codex split, cost-first
+  model rows (`gpt-5.6-sol (x-high)`) with hover token detail.
+- **Analytics**: a GitHub-style burn calendar, a 14/30/90-day trend line, an
+  hour-of-day rhythm chart in *your* timezone, and gym-style personal
+  records with a live "PR NOW" badge while a record is being set.
+- **The pit**: a private board for your crew. Invite code in, no accounts,
+  ranked by today's burn, $5/day streaks, emoji avatars.
+
+And it is deliberately tiny: **about 1.2 MB compressed, 3.5 MB installed**,
+native SwiftUI over a Rust engine, no Electron. CI enforces a 2 MB
+download budget so it stays that way.
+
+## Install
+
+Build from source (Rust + Swift toolchains, macOS 14+):
 
 ```sh
-cd app
+git clone https://github.com/kevinsslin/brrrn
+cd brrrn/app
 ./scripts/build-app.sh
-./scripts/measure-size.sh
+open dist/BrrrnBar.app
 ```
 
-## What is included
-
-- **Rust CLI and engine**: local Claude Code + Codex log scanning, model/cache
-  aware pricing, UTC calendar days, ISO weeks, calendar months, and a $5/day
-  streak.
-- **Native macOS menu bar app**: today's cost in the bar, cost-first model
-  breakdowns, hover input/output tokens, private friend rankings, and clickable
-  14-day member history.
-- **Private pit hub**: Cloudflare Worker + KV, with one tiny Durable Object
-  coordinator for atomic joins, rate limits, and concurrent submissions. Invite
-  codes connect a group; first submit backfills history, later submits update
-  today and yesterday.
-- **Sharing**: `brrrn flex` opens a pre-filled post with today's personal and
-  crew burn.
-
-Full product decisions and API schemas live in [PRD.md](PRD.md).
+The bundle embeds the CLI, so that is the only build step you need. Signed
+GitHub Releases, a Homebrew tap, and `cargo install brrrn` are on the
+[roadmap](#roadmap).
 
 ## CLI quick start
 
 ```sh
 cargo build --release
 
-./target/release/brrrn
-./target/release/brrrn --period today
-./target/release/brrrn --period week
-./target/release/brrrn --period month
-./target/release/brrrn --daily
-./target/release/brrrn --json
+./target/release/brrrn                  # all-time burn by model
+./target/release/brrrn --period week    # ISO week, Monday 00:00 UTC
+./target/release/brrrn --daily          # per-day table
+./target/release/brrrn --json           # machine-readable, feeds the app
 ```
 
 Days use UTC by default so friends in different timezones compare the same
-calendar day. Personal reports can opt into local calendar days:
-
-```sh
-brrrn --tz local
-```
-
-A full 8.9GB history scan takes about 8 seconds once. The per-file incremental
-cache brings typical warm scans to roughly 0.1 seconds.
-
-## macOS menu bar app
-
-```sh
-cargo build --release
-cd app
-swift test
-./scripts/build-app.sh
-open dist/BrrrnBar.app
-```
-
-The app is native SwiftUI (`MenuBarExtra`, macOS 14+) and runs without a Dock
-icon. It refreshes local usage every minute and after filesystem changes. Every
-five minutes it submits fresh daily aggregates and pulls the latest pit board.
-
-For development:
-
-```sh
-cd app
-BRRRN_BIN=../target/release/brrrn swift run BrrrnBar
-```
+calendar day; `--tz local` opts personal reports into local days. A full
+8.9 GB history scan takes about 8 seconds once. The per-file incremental
+cache brings warm scans to roughly 0.1 seconds.
 
 ## Add friends
 
-A friend group is called a **pit**. Membership is intentionally simple: share a
-server-generated invite code in your group chat.
+A friend group is called a **pit**. Membership is intentionally simple:
+share a server-generated invite code in your group chat. In the app, the
+👤+ button in the footer starts or joins a pit with no terminal involved.
 
-### 1. Deploy the hub
+### 1. Deploy your hub (once per crew)
+
+The backend is a single Cloudflare Worker with KV storage and one Durable
+Object. The free tier comfortably covers a friend group; there are no
+accounts and nothing to operate.
 
 ```sh
 cd hub
@@ -109,35 +95,36 @@ npx wrangler kv namespace create BRRRN_KV
 npx wrangler deploy
 ```
 
-### 2. Configure and create a pit
+### 2. Create a pit and invite your crew
 
 ```sh
 brrrn config set-hub https://brrrn-hub.<account>.workers.dev
-brrrn pit new --name "Taipei Burn Club"
+brrrn pit new --name "night shift"        # prints the join code
 ```
 
-Share the printed code. Each person joins with their own handle:
+Each person joins with their own handle and backfills their history:
 
 ```sh
 brrrn pit join ember-fox-x7kq --as kevin
 brrrn submit
 ```
 
-### 3. View and drill down
+### 3. Watch the fire
 
 ```sh
-brrrn pit
-brrrn pit show kevin
-brrrn flex --no-open
+brrrn pit              # the board
+brrrn pit show kevin   # one member's recent history
+brrrn flex             # brag on social media
 ```
 
-The first submit backfills all available daily history (chunked at 400 days per
-request). Later submits send today and yesterday. Multiple Macs get distinct
-machine IDs and add together instead of overwriting each other.
+The first submit backfills all available daily history in one POST. Later
+submits send today and yesterday. Multiple Macs get distinct machine IDs
+and add together instead of overwriting each other. Boards refresh every
+five minutes in the app.
 
 ## What gets uploaded
 
-Only these daily aggregates leave the machine:
+Only these daily aggregates leave the machine, and only after you join a pit:
 
 - pit code and handle
 - random machine ID
@@ -147,10 +134,11 @@ Only these daily aggregates leave the machine:
 - per-model input tokens, output tokens, and cost
 
 Never uploaded: prompts, responses, file paths, repository names, session
-content, or timestamps finer than a UTC day.
+content, or timestamps finer than a UTC day. If you never run `pit join` or
+`submit`, nothing leaves your machine at all.
 
-This is an honor-system leaderboard for people you know. It does not attempt to
-prevent a friend from submitting fake numbers.
+This is an honor-system leaderboard for people you know. It does not attempt
+to prevent a friend from submitting fake numbers.
 
 ## Data sources
 
@@ -174,26 +162,61 @@ Known pricing gaps:
 
 - Codex multi-agent child sessions sometimes omit their model and appear as
   `unknown` (tokens count, cost does not).
-- Models with no public LiteLLM price, such as `gpt-5.3-codex-spark` and
-  `codex-auto-review`, show `n/a` cost.
+- Models with no public LiteLLM price show `n/a` cost.
 - Claude fast rows remain separate, but use standard pricing until a distinct
   public fast-mode price is available.
+
+## Timezone model
+
+Anything social is UTC, so "who won today" means the same day for everyone.
+Anything personal follows your clock. Concretely: the calendar, trend,
+streaks, and boards use UTC days; the rhythm chart re-buckets the engine's
+UTC hour instants into your local timezone (exact at hour granularity, with
+a UTC toggle); the biggest-hour record is shown in local time.
+
+## Architecture
+
+| Piece | Stack | Job |
+|---|---|---|
+| `src/` | Rust | Log scanning, dedupe, pricing, UTC day/hour aggregation, incremental cache, social CLI |
+| `app/` | Swift, SwiftUI, Charts | Menu bar app: analytics, boards, in-app pit setup, five-minute auto-sync |
+| `hub/` | Cloudflare Worker + KV + Durable Object | Pit storage, atomic joins, rate limits, board reads |
+
+Product decisions, API schema, and the trust model live in [PRD.md](PRD.md).
 
 ## Development
 
 ```sh
 cargo fmt --check
 cargo clippy --all-targets -- -D warnings
-cargo test
+cargo test                              # engine
 
-cd hub && npm test
-cd ../app && swift test && ./scripts/build-app.sh
+cd hub && npm test                      # worker
+cd app && swift test                    # app
+cd app && ./scripts/build-app.sh        # release bundle + size budget
+```
+
+For app development against a local engine build:
+
+```sh
+cd app
+BRRRN_BIN=../target/release/brrrn swift run BrrrnBar
 ```
 
 The project uses conventional commits and test-first coverage for parsing,
-deduplication, pricing, calendar windows, streak behavior, cache invalidation,
-payload building, Worker routes, frozen JSON schemas, formatting, and sorting.
+deduplication, pricing, calendar windows, streaks, timezone re-bucketing,
+cache invalidation, Worker routes, frozen JSON schemas, and rendering-free
+view logic. See [CONTRIBUTING.md](CONTRIBUTING.md).
+
+## Roadmap
+
+- Signed, notarized GitHub Releases; Homebrew tap; `cargo install brrrn`
+- v2 social API in the clients: direct friends, named groups, and single-use
+  invitation links (the hub side is implemented and tested)
+- Synced custom avatars
+- Per-pit Durable Object sharding for large shared hubs
+- Spotify-Wrapped-style weekly share cards
 
 ## License
 
-MIT. See [LICENSE](LICENSE).
+MIT. See [LICENSE](LICENSE). Burn responsibly.
