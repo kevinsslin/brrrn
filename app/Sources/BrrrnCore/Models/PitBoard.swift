@@ -48,6 +48,7 @@ public struct PitBoard: Codable, Sendable, Equatable {
 
     public struct Member: Codable, Sendable, Equatable, Identifiable {
         public var handle: String
+        public var displayName: String?
         public var todayUSD: Double
         public var weekUSD: Double
         public var monthUSD: Double
@@ -57,8 +58,15 @@ public struct PitBoard: Codable, Sendable, Equatable {
 
         public var id: String { handle }
 
+        /// What the row shows: the cosmetic name if set, else the handle.
+        public var boardName: String {
+            let trimmed = displayName?.trimmingCharacters(in: .whitespaces) ?? ""
+            return trimmed.isEmpty ? handle : trimmed
+        }
+
         enum CodingKeys: String, CodingKey {
             case handle
+            case displayName = "display_name"
             case todayUSD = "today_usd"
             case weekUSD = "week_usd"
             case monthUSD = "month_usd"
@@ -69,6 +77,7 @@ public struct PitBoard: Codable, Sendable, Equatable {
 
         public init(
             handle: String,
+            displayName: String? = nil,
             todayUSD: Double = 0,
             weekUSD: Double = 0,
             monthUSD: Double = 0,
@@ -77,6 +86,7 @@ public struct PitBoard: Codable, Sendable, Equatable {
             modelsWeek: [ModelWeek]? = nil
         ) {
             self.handle = handle
+            self.displayName = displayName
             self.todayUSD = todayUSD
             self.weekUSD = weekUSD
             self.monthUSD = monthUSD

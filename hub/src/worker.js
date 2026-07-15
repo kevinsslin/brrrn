@@ -346,6 +346,15 @@ async function enforceV2Limit(request, storage, env, action, limit, ttlSeconds, 
   );
 }
 
+function validateDisplayName(value) {
+  if (value === undefined || value === null) return { ok: true, name: null };
+  if (typeof value !== 'string') return { ok: false };
+  const name = value.trim();
+  const length = [...name].length;
+  if (length < 1 || length > 32 || /\p{Cc}/u.test(name)) return { ok: false };
+  return { ok: true, name };
+}
+
 async function joinPit(request, env, storage, code, now) {
   if (!(await pitExists(env.BRRRN_KV, code))) return error('pit not found', 404);
   if (!(await enforceJoinLimit(request, storage, env))) return error('too many join attempts', 429);
@@ -358,11 +367,29 @@ async function joinPit(request, env, storage, code, now) {
   if (typeof secret !== 'string' || secret.length < 1 || secret.length > 256) {
     return error('secret must be a non-empty string up to 256 characters');
   }
+  const display = validateDisplayName(parsed.value.display_name);
+  if (!display.ok) return error('display name must be 1-32 characters');
 
+  // The handle is permanent identity (day records key on it); the display
+  // name is cosmetic and editable. Re-joining with the same secret updates
+  // the display name instead of conflicting, which is also what makes the
+  // client's join retry idempotent.
   const key = `member:${code}:${handle}`;
-  if (await env.BRRRN_KV.get(key)) return error('handle already taken', 409);
+  const existingRaw = await env.BRRRN_KV.get(key);
+  if (existingRaw) {
+    const existing = JSON.parse(existingRaw);
+    if (existing.secret_hash !== await sha256(secret)) {
+      return error('handle already taken', 409);
+    }
+    await env.BRRRN_KV.put(key, JSON.stringify({
+      ...existing,
+      display_name: display.name ?? existing.display_name ?? null,
+    }));
+    return json({ ok: true });
+  }
   await env.BRRRN_KV.put(key, JSON.stringify({
     secret_hash: await sha256(secret),
+    display_name: display.name,
     joined_at: now.toISOString(),
   }));
   return json({ ok: true });
@@ -1163,10 +1190,15 @@ async function getBoard(env, code, now) {
   const pit = await pitExists(env.BRRRN_KV, code);
   if (!pit) return error('pit not found', 404, true);
   const memberKeys = await listKeys(env.BRRRN_KV, `member:${code}:`);
+  const memberValues = await kvJsonValues(env.BRRRN_KV, memberKeys);
   const members = await Promise.all(memberKeys.map(async (key) => {
     const handle = key.slice(`member:${code}:`.length);
     const records = await dailyRecords(env, `day:${code}:${handle}:`);
-    return { handle, ...aggregateMember(records, now) };
+    return {
+      handle,
+      display_name: memberValues.get(key)?.display_name ?? null,
+      ...aggregateMember(records, now),
+    };
   }));
   members.sort((a, b) => b.today_usd - a.today_usd || a.handle.localeCompare(b.handle));
   return json({ name: pit.name ?? null, code, streak_threshold_usd: STREAK_THRESHOLD_USD, members }, 200, true);

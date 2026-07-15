@@ -255,7 +255,7 @@ enum ScreenshotGenerator {
                       streakDays: 11, topModel: "claude-fable-5",
                       modelsWeek: [.init(model: "claude-fable-5", inputTokens: 48_113_204,
                                          outputTokens: 1_952_331, costUSD: 941.52)]),
-                .init(handle: "mitsuha", todayUSD: 187.92, weekUSD: 1_688.04, monthUSD: 5_231.87,
+                .init(handle: "mitsuha", displayName: "Mitsuha", todayUSD: 187.92, weekUSD: 1_688.04, monthUSD: 5_231.87,
                       streakDays: 24, topModel: "gpt-5.6-sol",
                       modelsWeek: [.init(model: "gpt-5.6-sol", inputTokens: 12_004_113,
                                          outputTokens: 4_113_209, costUSD: 1_020.44)]),

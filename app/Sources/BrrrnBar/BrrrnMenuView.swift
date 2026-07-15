@@ -38,10 +38,12 @@ struct BrrrnMenuView: View {
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
                 .padding(.bottom, 2)
-            if snapshotMode {
-                sections
-            } else {
+            if rootTabRaw == "pits" && !snapshotMode {
                 ScrollView { sections }
+            } else {
+                // The Me page fits the window: only the by-model list
+                // scrolls, internally, so the menu never shows an outer bar.
+                sections
             }
             Footer(model: model) { showPitSetup = true }
         }
@@ -71,7 +73,7 @@ struct BrrrnMenuView: View {
                     }
                 }
                 Divider()
-                ModelSection(model: model)
+                ModelSection(model: model, snapshotMode: snapshotMode)
             }
         }
         .padding(18)
@@ -84,10 +86,6 @@ private struct MeHeader: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text("ME")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(1.2)
             if let report {
                 Text(Format.money(report.windows.today.costUSD))
                     .font(.system(size: 34, weight: .bold, design: .rounded))
@@ -352,23 +350,15 @@ private struct SourceValue: View {
 
 private struct ModelSection: View {
     @ObservedObject var model: AppModel
+    var snapshotMode = false
 
-    @AppStorage("modelsExpanded") private var isExpanded = false
     @AppStorage("modelsPeriod") private var periodRaw = AppModel.ModelPeriod.week.rawValue
-
-    private static let collapsedCount = 3
 
     private var period: AppModel.ModelPeriod {
         AppModel.ModelPeriod(rawValue: periodRaw) ?? .week
     }
 
     private var models: [BurnReport.ModelUsage] { model.models(for: period) }
-
-    private var hidden: Int { max(0, models.count - Self.collapsedCount) }
-
-    private var visibleModels: ArraySlice<BurnReport.ModelUsage> {
-        isExpanded ? models[...] : models.prefix(Self.collapsedCount)
-    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -388,27 +378,24 @@ private struct ModelSection: View {
                 Text("No model usage \(period == .today ? "today" : "this \(period.rawValue)")")
                     .font(.callout)
                     .foregroundStyle(.secondary)
-            } else {
-                ForEach(visibleModels) { model in
+                Spacer(minLength: 0)
+            } else if snapshotMode {
+                ForEach(models) { model in
                     ModelRow(model: model)
                 }
-                if hidden > 0 {
-                    Button {
-                        withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
-                    } label: {
-                        HStack(spacing: 4) {
-                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
-                                .font(.caption2)
-                            Text(isExpanded ? "Show less" : "\(hidden) more model\(hidden == 1 ? "" : "s")")
-                                .font(.caption)
+            } else {
+                // The list scrolls inside its own box, so the Me page never
+                // needs the window scrollbar.
+                ScrollView {
+                    VStack(alignment: .leading, spacing: 10) {
+                        ForEach(models) { model in
+                            ModelRow(model: model)
                         }
-                        .foregroundStyle(.secondary)
-                        .contentShape(Rectangle())
                     }
-                    .buttonStyle(.plain)
                 }
             }
         }
+        .frame(maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -648,8 +635,9 @@ private struct MemberRow: View {
                     .font(.system(size: 13))
                     .frame(width: 22, height: 22)
                     .background(.quaternary.opacity(0.6), in: Circle())
-                Text(member.handle)
+                Text(member.boardName)
                     .font(.callout.weight(.medium))
+                    .lineLimit(1)
                 if isWeeklyKing {
                     Image(systemName: "crown.fill")
                         .font(.caption)
@@ -739,7 +727,12 @@ private struct MemberDetailView: View {
                 HStack(spacing: 6) {
                     Text(MemberAvatar.emoji(for: selection.member.handle))
                         .font(.system(size: 15))
-                    Text(selection.member.handle).font(.headline)
+                    Text(selection.member.boardName).font(.headline)
+                    if selection.member.boardName != selection.member.handle {
+                        Text("@\(selection.member.handle)")
+                            .font(.caption)
+                            .foregroundStyle(.secondary)
+                    }
                 }
                 Spacer()
                 Color.clear.frame(width: 45)

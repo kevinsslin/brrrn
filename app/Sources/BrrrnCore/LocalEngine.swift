@@ -74,10 +74,19 @@ public enum LocalEngine {
         return code
     }
 
-    /// `brrrn pit join <code> --as <handle>`; the CLI claims the handle and
-    /// persists the secret/machine ID into the shared config.
-    public static func joinPit(binary: String, code: String, handle: String) async throws {
-        _ = try await run(binary: binary, arguments: ["pit", "join", code, "--as", handle])
+    /// `brrrn pit join <code> --as <handle> [--display <name>]`; the CLI
+    /// claims the handle and persists the secret/machine ID into the config.
+    public static func joinPit(
+        binary: String,
+        code: String,
+        handle: String,
+        displayName: String? = nil
+    ) async throws {
+        var arguments = ["pit", "join", code, "--as", handle]
+        if let displayName, !displayName.isEmpty {
+            arguments.append(contentsOf: ["--display", displayName])
+        }
+        _ = try await run(binary: binary, arguments: arguments)
     }
 
     private static func run(binary: String, arguments: [String]) async throws -> Data {

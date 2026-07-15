@@ -19,6 +19,7 @@ struct PitSetupView: View {
 
     @State private var mode: Mode = .join
     @State private var handle = ""
+    @State private var displayName = ""
     @State private var pitName = ""
     @State private var code = ""
     @State private var isWorking = false
@@ -119,12 +120,19 @@ struct PitSetupView: View {
                 }
             } else {
                 labeledField(
-                    label: "YOUR HANDLE",
+                    label: "YOUR HANDLE (PERMANENT)",
                     placeholder: "mitsuha",
                     text: $handle,
                     sample: "mitsuha"
                 )
             }
+
+            labeledField(
+                label: "DISPLAY NAME (OPTIONAL, EDITABLE)",
+                placeholder: "Mitsuha",
+                text: $displayName,
+                sample: "Mitsuha"
+            )
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
@@ -243,14 +251,18 @@ struct PitSetupView: View {
             switch mode {
             case .create:
                 let trimmedName = pitName.trimmingCharacters(in: .whitespaces)
+                let display = displayName.trimmingCharacters(in: .whitespaces)
                 createdCode = try await model.createPit(
                     name: trimmedName.isEmpty ? nil : trimmedName,
-                    handle: effectiveHandle
+                    handle: effectiveHandle,
+                    displayName: display.isEmpty ? nil : display
                 )
             case .join:
+                let display = displayName.trimmingCharacters(in: .whitespaces)
                 try await model.joinPit(
                     code: code.trimmingCharacters(in: .whitespaces).lowercased(),
-                    handle: effectiveHandle
+                    handle: effectiveHandle,
+                    displayName: display.isEmpty ? nil : display
                 )
                 onClose()
             }

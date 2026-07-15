@@ -2140,6 +2140,45 @@ test('board sorts members by today_usd desc', async () => {
   assert.deepEqual(board.data.members.map((m) => m.handle), ['high', 'mid', 'low']);
 });
 
+test('display names are cosmetic, editable, and never identity', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'names');
+
+  const joined = await call(env, 'POST', `/pit/${code}/join`, {
+    handle: 'kevin', secret: 's1', display_name: '  Kevin the Flame  ',
+  });
+  assert.equal(joined.status, 200);
+
+  let board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.members[0].display_name, 'Kevin the Flame');
+
+  // Re-join with the same secret renames; a different secret still conflicts.
+  const renamed = await call(env, 'POST', `/pit/${code}/join`, {
+    handle: 'kevin', secret: 's1', display_name: 'K-dawg',
+  });
+  assert.equal(renamed.status, 200);
+  const impostor = await call(env, 'POST', `/pit/${code}/join`, {
+    handle: 'kevin', secret: 'other', display_name: 'Impostor',
+  });
+  assert.equal(impostor.status, 409);
+
+  // Re-join without a display name keeps the existing one.
+  const keep = await call(env, 'POST', `/pit/${code}/join`, { handle: 'kevin', secret: 's1' });
+  assert.equal(keep.status, 200);
+  board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.members[0].display_name, 'K-dawg');
+
+  // Members without one report null; invalid names are rejected.
+  assert.equal((await join(env, code, 'plain', 's2')).status, 200);
+  board = await call(env, 'GET', `/pit/${code}/board`);
+  const plain = board.data.members.find((m) => m.handle === 'plain');
+  assert.equal(plain.display_name, null);
+  const bad = await call(env, 'POST', `/pit/${code}/join`, {
+    handle: 'toolong', secret: 's3', display_name: 'x'.repeat(33),
+  });
+  assert.equal(bad.status, 400);
+});
+
 test('PIT_CREATE_TOKEN gates creation but never joining', async () => {
   const env = makeEnv();
   env.PIT_CREATE_TOKEN = 'crew-only';

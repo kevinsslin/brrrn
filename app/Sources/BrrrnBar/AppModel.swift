@@ -55,7 +55,7 @@ final class AppModel: ObservableObject {
         case .month: monthReport
         }
         return Array(
-            ModelSort.byCostDescending(ModelMerge.foldFastMode(source?.byModel ?? [])).prefix(8)
+            ModelSort.byCostDescending(ModelMerge.foldFastMode(source?.byModel ?? [])).prefix(24)
         )
     }
 
@@ -166,25 +166,29 @@ final class AppModel: ObservableObject {
 
     /// Create a pit, join it as `handle`, backfill, and refresh. Returns the
     /// new code so the UI can hand it to friends.
-    func createPit(name: String?, handle: String) async throws -> String {
+    func createPit(name: String?, handle: String, displayName: String? = nil) async throws -> String {
         guard let binary = BinaryLocator().locate() else {
             throw EngineError.binaryNotFound
         }
         let code = try await LocalEngine.createPit(binary: binary, name: name)
         try await configStore.serialize {
-            try await LocalEngine.joinPit(binary: binary, code: code, handle: handle)
+            try await LocalEngine.joinPit(
+                binary: binary, code: code, handle: handle, displayName: displayName
+            )
         }
         await refresh(forcePit: true)
         return code
     }
 
     /// Join an existing pit as `handle`, backfill, and refresh.
-    func joinPit(code: String, handle: String) async throws {
+    func joinPit(code: String, handle: String, displayName: String? = nil) async throws {
         guard let binary = BinaryLocator().locate() else {
             throw EngineError.binaryNotFound
         }
         try await configStore.serialize {
-            try await LocalEngine.joinPit(binary: binary, code: code, handle: handle)
+            try await LocalEngine.joinPit(
+                binary: binary, code: code, handle: handle, displayName: displayName
+            )
         }
         await refresh(forcePit: true)
     }

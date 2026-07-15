@@ -105,6 +105,9 @@ enum PitAction {
         code: String,
         #[arg(long = "as")]
         handle: String,
+        /// Display name shown on boards (handle stays your permanent ID)
+        #[arg(long)]
+        display: Option<String>,
     },
     /// Show one member's recent daily history
     Show {
@@ -294,7 +297,9 @@ fn run_config(cli: &Cli, action: &ConfigAction) -> Result<(), String> {
 fn run_pit(cli: &Cli, args: &PitArgs) -> Result<(), String> {
     match &args.action {
         Some(PitAction::New { name, token }) => pit_new(cli, name.as_deref(), token.as_deref()),
-        Some(PitAction::Join { code, handle }) => pit_join(cli, code, handle),
+        Some(PitAction::Join { code, handle, display }) => {
+            pit_join(cli, code, handle, display.as_deref())
+        }
         Some(PitAction::Show { handle, pit }) => pit_show(cli, handle, pit.as_deref()),
         None => pit_board(cli),
     }
@@ -319,7 +324,7 @@ fn pit_new(cli: &Cli, name: Option<&str>, token: Option<&str>) -> Result<(), Str
     Ok(())
 }
 
-fn pit_join(cli: &Cli, code: &str, handle: &str) -> Result<(), String> {
+fn pit_join(cli: &Cli, code: &str, handle: &str, display: Option<&str>) -> Result<(), String> {
     let path = config_path(cli);
     let normalized = handle.to_lowercase();
     let generated_secret = social::random_hex(24)?;
@@ -340,12 +345,15 @@ fn pit_join(cli: &Cli, code: &str, handle: &str) -> Result<(), String> {
             config.machine_id = Some(generated_machine);
         }
         let secret = config.secret.as_deref().unwrap();
+        let mut join_body = serde_json::Map::new();
+        join_body.insert("handle".into(), config.handle.as_str().into());
+        join_body.insert("secret".into(), secret.into());
+        if let Some(name) = display {
+            join_body.insert("display_name".into(), name.into());
+        }
         let response: OkResponse = social::post(
             &format!("{hub}/pit/{code}/join"),
-            &serde_json::json!({
-                "handle": config.handle.as_str(),
-                "secret": secret,
-            }),
+            &serde_json::Value::Object(join_body),
         )?;
         if !response.ok {
             return Err("hub did not accept the join".to_string());
