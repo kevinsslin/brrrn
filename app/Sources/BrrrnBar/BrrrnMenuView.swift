@@ -159,42 +159,48 @@ private struct AnalyticsSection: View {
                 options: AnalyticsTab.allCases.map { ($0.rawValue, $0.label) }
             )
 
-            switch tab {
-            case .calendar:
-                DailyHeatmap(
-                    title: "BURN CALENDAR",
-                    grid: UTCActivityGrid(
-                        entries: daily,
-                        weeks: 12,
-                        thresholdUSD: thresholdUSD
-                    ),
-                    compact: true
-                )
-            case .trend:
-                BurnTrendChart(
-                    points: BurnAnalytics.trend(entries: daily, days: trendDays),
-                    streakThresholdUSD: thresholdUSD,
-                    days: $trendDays
-                )
-            case .rhythm:
-                let rhythm = BurnAnalytics.rhythm(
-                    entries: daily,
-                    lookbackDays: rhythmLookback,
-                    timeZone: rhythmTimeZone
-                )
-                if rhythm.hasData {
-                    BurnRhythmChart(
-                        rhythm: rhythm,
-                        timeZone: rhythmTimeZone,
-                        lookbackDays: $rhythmLookback,
-                        usesUTC: $rhythmUsesUTC
+            // Every tab renders inside the same fixed-minimum box so
+            // switching never reflows the sections below.
+            Group {
+                switch tab {
+                case .calendar:
+                    DailyHeatmap(
+                        title: "BURN CALENDAR",
+                        grid: UTCActivityGrid(
+                            entries: daily,
+                            weeks: 12,
+                            thresholdUSD: thresholdUSD
+                        ),
+                        showsTable: false,
+                        compact: true
                     )
-                } else {
-                    RhythmUnavailable()
+                case .trend:
+                    BurnTrendChart(
+                        points: BurnAnalytics.trend(entries: daily, days: trendDays),
+                        streakThresholdUSD: thresholdUSD,
+                        days: $trendDays
+                    )
+                case .rhythm:
+                    let rhythm = BurnAnalytics.rhythm(
+                        entries: daily,
+                        lookbackDays: rhythmLookback,
+                        timeZone: rhythmTimeZone
+                    )
+                    if rhythm.hasData {
+                        BurnRhythmChart(
+                            rhythm: rhythm,
+                            timeZone: rhythmTimeZone,
+                            lookbackDays: $rhythmLookback,
+                            usesUTC: $rhythmUsesUTC
+                        )
+                    } else {
+                        RhythmUnavailable()
+                    }
+                case .records:
+                    RecordsView(records: BurnAnalytics.records(entries: daily, thresholdUSD: thresholdUSD))
                 }
-            case .records:
-                RecordsView(records: BurnAnalytics.records(entries: daily, thresholdUSD: thresholdUSD))
             }
+            .frame(minHeight: 196, alignment: .topLeading)
         }
     }
 }
