@@ -6,6 +6,13 @@ export const STREAK_THRESHOLD_USD = 5;
 export const MAX_DAYS_PER_REQUEST = 400;
 export const MAX_MODELS_PER_DAY = 30;
 export const MAX_MODEL_NAME_LEN = 64;
+export const MAX_TOKENS_PER_DAY = 1_000_000_000_000;
+export const MAX_DAILY_USD = 1_000_000;
+export const MAX_MODELS_PER_MEMBER_RESPONSE = 30;
+
+export function stableCost(value) {
+  return Math.round(value * 1_000_000) / 1_000_000;
+}
 
 // Suffix charset: a-z0-9 without the ambiguous l/1/o/0.
 export const CODE_CHARS = 'abcdefghijkmnpqrstuvwxyz23456789';
@@ -47,6 +54,45 @@ export function normalizeHandle(handle) {
   return /^[a-z0-9_-]{1,24}$/.test(h) ? h : null;
 }
 
+const RELATIONSHIP_ID_RE = /^rel_[A-Za-z0-9_-]{24,128}$/;
+const INVITATION_TOKEN_RE = /^inv_[A-Za-z0-9_-]{24,128}$/;
+const CONTROL_CHARACTER_RE = /\p{Cc}/u;
+
+export function validRelationshipId(value) {
+  return typeof value === 'string' && RELATIONSHIP_ID_RE.test(value);
+}
+
+export function validInvitationToken(value) {
+  return typeof value === 'string' && INVITATION_TOKEN_RE.test(value);
+}
+
+export function validateRelationshipDefinition(value) {
+  if (typeof value !== 'object' || value === null || Array.isArray(value)) {
+    return { ok: false, error: 'relationship must be an object' };
+  }
+  if (value.type === 'direct') {
+    if (value.name !== undefined && value.name !== null) {
+      return { ok: false, error: 'direct relationships cannot have a name' };
+    }
+    return { ok: true, type: 'direct', name: null, memberLimit: 2 };
+  }
+  if (value.type !== 'group') {
+    return { ok: false, error: 'type must be direct or group' };
+  }
+  if (typeof value.name !== 'string') {
+    return { ok: false, error: 'group name must be a string' };
+  }
+  const name = value.name.trim();
+  const length = [...name].length;
+  if (length < 1 || length > 80) {
+    return { ok: false, error: 'group name must be 1-80 characters' };
+  }
+  if (CONTROL_CHARACTER_RE.test(name)) {
+    return { ok: false, error: 'group name cannot contain control characters' };
+  }
+  return { ok: true, type: 'group', name, memberLimit: 100 };
+}
+
 // ---- UTC window math ----
 
 function toDate(now) {
@@ -86,12 +132,12 @@ function validDateString(value) {
     && date.getUTCDate() === day;
 }
 
-function finiteNonNeg(v) {
-  return typeof v === 'number' && Number.isFinite(v) && v >= 0;
+function validUsd(v) {
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= MAX_DAILY_USD;
 }
 
 function nonNegInteger(v) {
-  return Number.isSafeInteger(v) && v >= 0;
+  return Number.isSafeInteger(v) && v >= 0 && v <= MAX_TOKENS_PER_DAY;
 }
 
 function optionalUsd(v) {
@@ -115,13 +161,13 @@ export function validateDays(days) {
       return { ok: false, error: `invalid date: ${JSON.stringify(d.date)}` };
     }
     const tokens = d.tokens;
-    const cost = d.cost_usd;
-    const claude = optionalUsd(d.claude_usd);
-    const codex = optionalUsd(d.codex_usd);
-    if (!nonNegInteger(tokens) || ![cost, claude, codex].every(finiteNonNeg)) {
+    const rawCost = d.cost_usd;
+    const rawClaude = optionalUsd(d.claude_usd);
+    const rawCodex = optionalUsd(d.codex_usd);
+    if (!nonNegInteger(tokens) || ![rawCost, rawClaude, rawCodex].every(validUsd)) {
       return { ok: false, error: `invalid numbers for ${d.date}` };
     }
-    const models = {};
+    const modelEntries = [];
     if (d.models !== undefined) {
       if (typeof d.models !== 'object' || d.models === null || Array.isArray(d.models)) {
         return { ok: false, error: `models must be an object for ${d.date}` };
@@ -138,14 +184,28 @@ export function validateDays(days) {
         if (
           typeof m !== 'object' || m === null ||
           !nonNegInteger(m.input_tokens) || !nonNegInteger(m.output_tokens) ||
-          !finiteNonNeg(m.cost_usd)
+          !validUsd(m.cost_usd)
         ) {
           return { ok: false, error: `invalid model entry ${name} for ${d.date}` };
         }
-        models[name] = { i: m.input_tokens, o: m.output_tokens, c: m.cost_usd };
+        modelEntries.push([name, {
+          i: m.input_tokens,
+          o: m.output_tokens,
+          c: stableCost(m.cost_usd),
+        }]);
       }
     }
-    out.push({ date: d.date, rec: { t: tokens, c: cost, cc: claude, cx: codex, models } });
+    const models = Object.fromEntries(modelEntries);
+    out.push({
+      date: d.date,
+      rec: {
+        t: tokens,
+        c: stableCost(rawCost),
+        cc: stableCost(rawClaude),
+        cx: stableCost(rawCodex),
+        models,
+      },
+    });
   }
   return { ok: true, days: out };
 }
@@ -177,15 +237,15 @@ export function computeStreak(costByDate, now, threshold = STREAK_THRESHOLD_USD)
 // ---- board aggregation ----
 
 // machineRecords: array of stored day-record maps, one per machine_id.
-export function aggregateMember(machineRecords, now) {
+export function aggregateMember(machineRecords, now, maxModels = Infinity) {
   const today = utcDay(now);
   const weekStart = isoWeekStart(now);
   const mStart = monthStart(now);
-  const costByDate = {};
+  const costByDate = Object.create(null);
   let todayUsd = 0;
   let weekUsd = 0;
   let monthUsd = 0;
-  const weekModels = {};
+  const weekModels = new Map();
 
   for (const rec of machineRecords) {
     for (const [date, d] of Object.entries(rec)) {
@@ -197,23 +257,37 @@ export function aggregateMember(machineRecords, now) {
       if (date >= weekStart) {
         weekUsd += cost;
         for (const [name, m] of Object.entries(d.models || {})) {
-          const agg = (weekModels[name] ??= { input_tokens: 0, output_tokens: 0, cost_usd: 0 });
+          const agg = weekModels.get(name) ?? {
+            input_tokens: 0,
+            output_tokens: 0,
+            cost_usd: 0,
+          };
           agg.input_tokens += m.i || 0;
           agg.output_tokens += m.o || 0;
           agg.cost_usd += m.c || 0;
+          weekModels.set(name, agg);
         }
       }
     }
   }
 
-  const modelsWeek = Object.entries(weekModels)
-    .map(([model, m]) => ({ model, ...m }))
-    .sort((a, b) => b.cost_usd - a.cost_usd || a.model.localeCompare(b.model));
+  for (const date of Object.keys(costByDate)) {
+    costByDate[date] = stableCost(costByDate[date]);
+  }
+
+  const modelsWeek = [...weekModels.entries()]
+    .map(([model, m]) => ({
+      model,
+      ...m,
+      cost_usd: stableCost(m.cost_usd),
+    }))
+    .sort((a, b) => b.cost_usd - a.cost_usd || a.model.localeCompare(b.model))
+    .slice(0, maxModels);
 
   return {
-    today_usd: todayUsd,
-    week_usd: weekUsd,
-    month_usd: monthUsd,
+    today_usd: stableCost(todayUsd),
+    week_usd: stableCost(weekUsd),
+    month_usd: stableCost(monthUsd),
     streak_days: computeStreak(costByDate, now),
     top_model: modelsWeek.length ? modelsWeek[0].model : null,
     models_week: modelsWeek,
@@ -230,5 +304,10 @@ export function memberSeries(machineRecords) {
       e.cost_usd += d.c || 0;
     }
   }
-  return Object.values(byDate).sort((a, b) => a.date.localeCompare(b.date));
+  return Object.values(byDate)
+    .map((entry) => ({
+      ...entry,
+      cost_usd: stableCost(entry.cost_usd),
+    }))
+    .sort((a, b) => a.date.localeCompare(b.date));
 }

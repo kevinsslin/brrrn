@@ -1,10 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
-import {
+import * as logic from '../src/logic.js';
+
+const {
   WORDS,
   CODE_CHARS,
   STREAK_THRESHOLD_USD,
   MAX_DAYS_PER_REQUEST,
+  MAX_TOKENS_PER_DAY,
+  MAX_DAILY_USD,
+  MAX_MODELS_PER_MEMBER_RESPONSE,
   generateJoinCode,
   normalizeHandle,
   utcDay,
@@ -16,7 +21,10 @@ import {
   computeStreak,
   aggregateMember,
   memberSeries,
-} from '../src/logic.js';
+  validRelationshipId,
+  validInvitationToken,
+  validateRelationshipDefinition,
+} = logic;
 
 // Fixed "now": Wednesday 2026-01-07. ISO week starts Monday 2026-01-05.
 const NOW = '2026-01-07T12:00:00Z';
@@ -83,6 +91,93 @@ test('normalizeHandle lowercases and validates', () => {
   assert.equal(normalizeHandle('emoji🔥'), null);
   assert.equal(normalizeHandle(42), null);
   assert.equal(normalizeHandle(null), null);
+});
+
+// ---- v2 relationship validation ----
+
+test('validRelationshipId accepts rel_ identifiers and rejects malformed values', () => {
+  const cases = [
+    ['rel_0123456789abcdef0123456789abcdef', true],
+    ['rel_ABCDefghijklmnopqrstuvwxyz_09-', true],
+    ['inv_0123456789abcdef0123456789abcdef', false],
+    ['rel_', false],
+    ['rel_has a space', false],
+    ['rel_has/slash', false],
+    ['', false],
+    [null, false],
+    [42, false],
+  ];
+  for (const [value, expected] of cases) {
+    assert.equal(validRelationshipId(value), expected, JSON.stringify(value));
+  }
+});
+
+test('validInvitationToken accepts inv_ capabilities and rejects malformed values', () => {
+  const cases = [
+    [`inv_${'a'.repeat(64)}`, true],
+    [`inv_${'Ab9_-'.repeat(10)}`, true],
+    [`rel_${'a'.repeat(64)}`, false],
+    ['inv_', false],
+    ['inv_has a space', false],
+    ['inv_has/slash', false],
+    ['', false],
+    [undefined, false],
+    [false, false],
+  ];
+  for (const [value, expected] of cases) {
+    assert.equal(validInvitationToken(value), expected, JSON.stringify(value));
+  }
+});
+
+test('validateRelationshipDefinition validates direct and group shapes', () => {
+  const cases = [
+    [{ type: 'direct' }, true, null],
+    [{ type: 'direct', name: null }, true, null],
+    [{ type: 'direct', name: 'named direct' }, false],
+    [{ type: 'group', name: 'friends' }, true, 'friends'],
+    [{ type: 'group', name: '' }, false],
+    [{ type: 'group', name: '   ' }, false],
+    [{ type: 'group' }, false],
+    [{ type: 'other', name: 'friends' }, false],
+    [null, false],
+  ];
+  for (const [input, expectedOk, expectedName] of cases) {
+    const result = validateRelationshipDefinition(input);
+    assert.equal(result.ok, expectedOk, JSON.stringify(input));
+    if (expectedOk) assert.equal(result.name, expectedName, JSON.stringify(input));
+  }
+});
+
+test('validateRelationshipDefinition trims Unicode group names without changing their content', () => {
+  const cases = [
+    ['  台北燒錢俱樂部  ', '台北燒錢俱樂部'],
+    ['　🔥 Burn 朋友 🔥　', '🔥 Burn 朋友 🔥'],
+    [' 開発者の会 👩‍💻 ', '開発者の会 👩‍💻'],
+  ];
+  for (const [name, expected] of cases) {
+    const result = validateRelationshipDefinition({ type: 'group', name });
+    assert.equal(result.ok, true, JSON.stringify(name));
+    assert.equal(result.name, expected);
+  }
+});
+
+test('group name length is measured in Unicode code points', () => {
+  const exactlyEighty = '🔥'.repeat(80);
+  const accepted = validateRelationshipDefinition({ type: 'group', name: exactlyEighty });
+  assert.equal(accepted.ok, true);
+  assert.equal(accepted.name, exactlyEighty);
+
+  const rejected = validateRelationshipDefinition({ type: 'group', name: `${exactlyEighty}火` });
+  assert.equal(rejected.ok, false);
+});
+
+test('group names reject control characters', () => {
+  const controls = [0x00, 0x09, 0x0a, 0x7f, 0x85];
+  for (const codePoint of controls) {
+    const name = `before${String.fromCodePoint(codePoint)}after`;
+    const result = validateRelationshipDefinition({ type: 'group', name });
+    assert.equal(result.ok, false, `accepted U+${codePoint.toString(16).padStart(4, '0')}`);
+  }
 });
 
 // ---- UTC window math ----
@@ -178,6 +273,49 @@ test('validateDays accepts a well formed record and compacts it', () => {
   });
 });
 
+test('validateDays preserves JavaScript prototype-named model keys', () => {
+  const models = JSON.parse(`{
+    "__proto__": {"input_tokens": 1, "output_tokens": 2, "cost_usd": 0.1},
+    "constructor": {"input_tokens": 3, "output_tokens": 4, "cost_usd": 0.2},
+    "toString": {"input_tokens": 5, "output_tokens": 6, "cost_usd": 0.3}
+  }`);
+  const res = validateDays([day({ models })]);
+
+  assert.equal(res.ok, true);
+  assert.deepEqual(Object.keys(res.days[0].rec.models).sort(), [
+    '__proto__',
+    'constructor',
+    'toString',
+  ]);
+  for (const name of Object.keys(models)) {
+    assert.equal(Object.hasOwn(res.days[0].rec.models, name), true);
+  }
+});
+
+test('validateDays canonicalizes accepted costs to micro-dollar precision', () => {
+  const res = validateDays([day({
+    cost_usd: 2.4999996,
+    claude_usd: 1.23456789,
+    codex_usd: 1.26543171,
+    models: {
+      precise: {
+        input_tokens: 80,
+        output_tokens: 20,
+        cost_usd: 2.4999996,
+      },
+    },
+  })]);
+
+  assert.equal(res.ok, true);
+  assert.deepEqual(res.days[0].rec, {
+    t: 100,
+    c: 2.5,
+    cc: 1.234568,
+    cx: 1.265432,
+    models: { precise: { i: 80, o: 20, c: 2.5 } },
+  });
+});
+
 test('validateDays treats missing split and models as zero', () => {
   const res = validateDays([
     { date: '2026-01-07', tokens: 10, cost_usd: 0.25 },
@@ -204,6 +342,32 @@ test('validateDays rejects negative and non-finite numbers', () => {
   assert.equal(validateDays([day({ models: { m: { input_tokens: 2.5, output_tokens: 1, cost_usd: 1 } } })]).ok, false);
   const badModel = day({ models: { m: { input_tokens: -5, output_tokens: 0, cost_usd: 0 } } });
   assert.equal(validateDays([badModel]).ok, false);
+});
+
+test('validateDays bounds tokens and costs to safe aggregate ranges', () => {
+  const accepted = validateDays([day({
+    tokens: MAX_TOKENS_PER_DAY,
+    cost_usd: MAX_DAILY_USD,
+    claude_usd: MAX_DAILY_USD,
+    codex_usd: MAX_DAILY_USD,
+    models: {
+      safe: {
+        input_tokens: MAX_TOKENS_PER_DAY,
+        output_tokens: MAX_TOKENS_PER_DAY,
+        cost_usd: MAX_DAILY_USD,
+      },
+    },
+  })]);
+  assert.equal(accepted.ok, true);
+  assert.equal(validateDays([day({ tokens: MAX_TOKENS_PER_DAY + 1 })]).ok, false);
+  assert.equal(validateDays([day({ cost_usd: MAX_DAILY_USD + 1 })]).ok, false);
+  assert.equal(validateDays([day({ claude_usd: MAX_DAILY_USD + 1 })]).ok, false);
+  assert.equal(validateDays([day({ codex_usd: MAX_DAILY_USD + 1 })]).ok, false);
+  assert.equal(validateDays([day({
+    models: {
+      unsafe: { input_tokens: 1, output_tokens: 1, cost_usd: MAX_DAILY_USD + 1 },
+    },
+  })]).ok, false);
 });
 
 test('validateDays rejects oversize payload shapes', () => {
@@ -266,6 +430,74 @@ test('aggregateMember sums windows across machines', () => {
   ]);
 });
 
+test('aggregateMember handles prototype-named models without mutating Object.prototype', () => {
+  const models = JSON.parse(`{
+    "__proto__": {"i": 1, "o": 2, "c": 0.1},
+    "constructor": {"i": 3, "o": 4, "c": 0.2},
+    "toString": {"i": 5, "o": 6, "c": 0.3}
+  }`);
+
+  try {
+    const agg = aggregateMember([{
+      '2026-01-07': { t: 21, c: 0.6, cc: 0.6, cx: 0, models },
+    }], NOW);
+
+    assert.deepEqual(agg.models_week, [
+      { model: 'toString', input_tokens: 5, output_tokens: 6, cost_usd: 0.3 },
+      { model: 'constructor', input_tokens: 3, output_tokens: 4, cost_usd: 0.2 },
+      { model: '__proto__', input_tokens: 1, output_tokens: 2, cost_usd: 0.1 },
+    ]);
+    assert.equal(Object.hasOwn(Object.prototype, 'input_tokens'), false);
+    assert.equal(Object.hasOwn(Object.prototype, 'output_tokens'), false);
+    assert.equal(Object.hasOwn(Object.prototype, 'cost_usd'), false);
+  } finally {
+    delete Object.prototype.input_tokens;
+    delete Object.prototype.output_tokens;
+    delete Object.prototype.cost_usd;
+  }
+});
+
+test('aggregateMember emits stable decimal USD totals', () => {
+  const agg = aggregateMember([
+    {
+      '2026-01-07': {
+        t: 1,
+        c: 0.1,
+        cc: 0.1,
+        cx: 0,
+        models: { fable: { i: 1, o: 0, c: 0.1 } },
+      },
+    },
+    {
+      '2026-01-07': {
+        t: 1,
+        c: 0.2,
+        cc: 0.2,
+        cx: 0,
+        models: { fable: { i: 0, o: 1, c: 0.2 } },
+      },
+    },
+  ], NOW);
+
+  assert.equal(agg.today_usd, 0.3);
+  assert.equal(agg.week_usd, 0.3);
+  assert.equal(agg.month_usd, 0.3);
+  assert.equal(agg.models_week[0].cost_usd, 0.3);
+});
+
+test('aggregateMember bounds weekly model response cardinality', () => {
+  const models = {};
+  for (let index = 0; index < 40; index += 1) {
+    models[`model-${String(index).padStart(2, '0')}`] = { i: 1, o: 1, c: index };
+  }
+  const agg = aggregateMember([{
+    '2026-01-07': { t: 80, c: 80, cc: 80, cx: 0, models },
+  }], NOW, MAX_MODELS_PER_MEMBER_RESPONSE);
+  assert.equal(agg.models_week.length, MAX_MODELS_PER_MEMBER_RESPONSE);
+  assert.equal(agg.models_week[0].model, 'model-39');
+  assert.equal(agg.models_week.at(-1).model, 'model-10');
+});
+
 test('aggregateMember with no data is all zeroes', () => {
   const agg = aggregateMember([], NOW);
   assert.deepEqual(agg, {
@@ -309,6 +541,17 @@ test('memberSeries sums across machines and sorts by date asc', () => {
   assert.deepEqual(memberSeries([machineA, machineB]), [
     { date: '2026-01-04', tokens: 10, cost_usd: 7 },
     { date: '2026-01-07', tokens: 150, cost_usd: 7 },
+  ]);
+});
+
+test('memberSeries emits stable decimal USD totals', () => {
+  const series = memberSeries([
+    { '2026-01-07': { t: 1, c: 0.1, cc: 0.1, cx: 0, models: {} } },
+    { '2026-01-07': { t: 1, c: 0.2, cc: 0.2, cx: 0, models: {} } },
+  ]);
+
+  assert.deepEqual(series, [
+    { date: '2026-01-07', tokens: 2, cost_usd: 0.3 },
   ]);
 });
 
