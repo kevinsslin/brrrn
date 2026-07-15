@@ -1,4 +1,4 @@
-name = "brrrn-hub"
+name = "brrrn"
 main = "src/worker.js"
 compatibility_date = "2026-07-01"
 
