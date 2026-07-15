@@ -32,12 +32,6 @@ public struct PitBoard: Codable, Sendable, Equatable {
 
     /// Members ranked by today's burn, descending. Ties break on week burn,
     /// then handle, so ordering is stable.
-    /// Handle of this week's top burner (the crown). Nil when nobody burned.
-    public var weeklyKing: String? {
-        members.max(by: { ($0.weekUSD, $1.handle) < ($1.weekUSD, $0.handle) })
-            .flatMap { $0.weekUSD > 0 ? $0.handle : nil }
-    }
-
     public var rankedMembers: [Member] {
         members.sorted { a, b in
             if a.todayUSD != b.todayUSD { return a.todayUSD > b.todayUSD }

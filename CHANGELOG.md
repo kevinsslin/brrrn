@@ -11,8 +11,7 @@ All notable changes to brrrn are documented here. The format follows
 - Pits can be renamed by any member, from the pencil next to the pit
   name in the app or `brrrn pit title <code> <name>` (pits deliberately
   have no admin tier; the trust model is your friends)
-- Today's top three wear medals on the board; the weekly top burner
-  keeps the crown
+- Today's top three wear podium medals on the board
 
 ### Changed
 

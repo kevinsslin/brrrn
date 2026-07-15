@@ -774,11 +774,7 @@ private struct PitBoardView: View {
                     .background(.quaternary, in: Capsule())
             }
             ForEach(Array(board.rankedMembers.enumerated()), id: \.element.id) { rank, member in
-                MemberRow(
-                    rank: rank + 1,
-                    member: member,
-                    isWeeklyKing: member.handle == board.weeklyKing
-                ) {
+                MemberRow(rank: rank + 1, member: member) {
                     Task { await model.openMember(pitCode: board.code, member: member) }
                 }
             }
@@ -789,7 +785,6 @@ private struct PitBoardView: View {
 private struct MemberRow: View {
     let rank: Int
     let member: PitBoard.Member
-    var isWeeklyKing = false
     let action: () -> Void
 
     var body: some View {
@@ -813,12 +808,6 @@ private struct MemberRow: View {
                 Text(member.boardName)
                     .font(.callout.weight(.medium))
                     .lineLimit(1)
-                if isWeeklyKing {
-                    Image(systemName: "crown.fill")
-                        .font(.caption)
-                        .foregroundStyle(.yellow)
-                        .help("This week's top burner")
-                }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(Format.money(member.todayUSD))
