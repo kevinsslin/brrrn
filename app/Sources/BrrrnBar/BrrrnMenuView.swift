@@ -619,7 +619,11 @@ private struct PitBoardView: View {
                     .background(.quaternary, in: Capsule())
             }
             ForEach(Array(board.rankedMembers.enumerated()), id: \.element.id) { rank, member in
-                MemberRow(rank: rank + 1, member: member) {
+                MemberRow(
+                    rank: rank + 1,
+                    member: member,
+                    isWeeklyKing: member.handle == board.weeklyKing
+                ) {
                     Task { await model.openMember(pitCode: board.code, member: member) }
                 }
             }
@@ -628,9 +632,9 @@ private struct PitBoardView: View {
 }
 
 private struct MemberRow: View {
-    @State private var showDetail = false
     let rank: Int
     let member: PitBoard.Member
+    var isWeeklyKing = false
     let action: () -> Void
 
     var body: some View {
@@ -646,6 +650,12 @@ private struct MemberRow: View {
                     .background(.quaternary.opacity(0.6), in: Circle())
                 Text(member.handle)
                     .font(.callout.weight(.medium))
+                if isWeeklyKing {
+                    Image(systemName: "crown.fill")
+                        .font(.caption)
+                        .foregroundStyle(.yellow)
+                        .help("This week's top burner")
+                }
                 Spacer()
                 VStack(alignment: .trailing, spacing: 1) {
                     Text(Format.money(member.todayUSD))
@@ -668,27 +678,7 @@ private struct MemberRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .delayedHover($showDetail)
-        .popover(isPresented: $showDetail, arrowEdge: .trailing) {
-            VStack(alignment: .leading, spacing: 10) {
-                Text(member.handle).font(.headline)
-                if member.modelsWeek?.isEmpty != false {
-                    Text("No model detail this week").foregroundStyle(.secondary)
-                } else {
-                    ForEach(member.modelsWeek ?? []) { model in
-                        TokenDetail(
-                            title: model.model,
-                            input: model.inputTokens,
-                            output: model.outputTokens,
-                            cost: model.costUSD,
-                            subtitle: nil
-                        )
-                    }
-                }
-            }
-            .padding(14)
-            .frame(minWidth: 240)
-        }
+        .accessibilityHint("Opens this member's history")
     }
 }
 
@@ -759,7 +749,18 @@ private struct MemberDetailView: View {
 
             detailScroll
         }
+        // Pin to the top and fill the window; otherwise the stack floats
+        // vertically centered with dead space above the Back header.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
         .overlay { if isLoading { ProgressView() } }
+    }
+
+    /// Most recent day this member actually burned, from their history.
+    private var lastBurned: Date? {
+        selection.detail.days
+            .filter { $0.costUSD > 0 }
+            .compactMap(\.dateValue)
+            .max()
     }
 
     @ViewBuilder
@@ -788,9 +789,37 @@ private struct MemberDetailView: View {
                         )
                     )
 
-            if let top = selection.member.topModel {
+            if selection.member.modelsWeek?.isEmpty == false {
+                VStack(alignment: .leading, spacing: 8) {
+                    Text("THIS WEEK BY MODEL")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(1.2)
+                    ForEach(selection.member.modelsWeek ?? []) { usage in
+                        HStack {
+                            Text(usage.model)
+                                .font(.callout)
+                                .lineLimit(1)
+                            Spacer(minLength: 8)
+                            Text(Format.tokens(usage.inputTokens + usage.outputTokens))
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                            Text(usage.costUSD.map(Format.money) ?? "n/a")
+                                .font(.callout.weight(.semibold))
+                                .frame(minWidth: 64, alignment: .trailing)
+                        }
+                        .monospacedDigit()
+                    }
+                }
+            } else if let top = selection.member.topModel {
                 LabeledContent("Top model this week", value: top)
                     .font(.callout)
+            }
+
+            if let lastBurned {
+                Label("Last burned \(Format.utcMonthDay(lastBurned)) UTC", systemImage: "clock")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
             }
         }
         .padding(18)
