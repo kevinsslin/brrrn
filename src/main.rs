@@ -204,7 +204,7 @@ fn scan_data(
         Some(
             cli.cache
                 .clone()
-                .unwrap_or_else(|| home().join("Library/Caches/brrrn/scan-v5.json")),
+                .unwrap_or_else(|| home().join("Library/Caches/brrrn/scan-v6.json")),
         )
     };
     Ok(scan::scan_all(

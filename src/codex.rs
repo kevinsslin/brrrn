@@ -47,6 +47,7 @@ pub fn scan_file(
 
     let mut cur_model: Option<String> = None;
     let mut cur_effort: String = "default".to_string();
+    let mut cur_tier: String = "default".to_string();
     let mut prev: Option<Totals> = None;
 
     loop {
@@ -57,6 +58,22 @@ pub fn scan_file(
             Err(_) => {
                 complete = false;
                 break;
+            }
+        }
+
+        // Service tier rides along in settings records (thread_settings);
+        // "priority" processing doubles the per-token price, so it is part
+        // of the variant identity like reasoning effort.
+        if line.contains("\"service_tier\"") {
+            if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
+                let p = &v["payload"];
+                if let Some(t) = p["thread_settings"]["service_tier"]
+                    .as_str()
+                    .or_else(|| p["settings"]["service_tier"].as_str())
+                    .or_else(|| p["service_tier"].as_str())
+                {
+                    cur_tier = t.to_string();
+                }
             }
         }
 
@@ -131,12 +148,17 @@ pub fn scan_file(
 
         claimed.push(hash);
         local_claims.insert(hash);
+        let speed = if cur_tier == "default" || cur_tier.is_empty() {
+            cur_effort.clone()
+        } else {
+            format!("{cur_effort} {cur_tier}")
+        };
         entries.push(Entry {
             date,
             hour,
             source: Source::Codex,
             model: cur_model.clone().unwrap_or_else(|| "unknown".to_string()),
-            speed: cur_effort.clone(),
+            speed,
             usage: u,
         });
     }
@@ -188,6 +210,34 @@ mod tests {
             t = ti + to,
             l = li + lo,
         )
+    }
+
+    #[test]
+    fn priority_service_tier_joins_the_variant() {
+        let settings = r#"{"timestamp":"2026-07-13T10:00:00.000Z","type":"event_msg","payload":{"type":"thread_settings_updated","thread_settings":{"model":"gpt-5.6-sol","service_tier":"priority"}}}"#;
+        let back_to_default = r#"{"timestamp":"2026-07-13T10:00:02.500Z","type":"event_msg","payload":{"type":"thread_settings_updated","thread_settings":{"model":"gpt-5.6-sol","service_tier":"default"}}}"#;
+        let content = [
+            settings.to_string(),
+            turn_ctx("gpt-5.6-sol", "xhigh"),
+            token_count(
+                "2026-07-13T10:00:01Z",
+                u(1000, 400, 100, 50),
+                u(1000, 400, 100, 50),
+            ),
+            back_to_default.to_string(),
+            token_count(
+                "2026-07-13T10:00:03Z",
+                u(1500, 700, 160, 80),
+                u(500, 300, 60, 30),
+            ),
+        ]
+        .join("\n");
+        let path = fixture("tier.jsonl", &content);
+
+        let (entries, _, _, _) = scan_file(&path, &mut HashSet::new(), true);
+        assert_eq!(entries.len(), 2);
+        assert_eq!(entries[0].speed, "xhigh priority");
+        assert_eq!(entries[1].speed, "xhigh");
     }
 
     #[test]

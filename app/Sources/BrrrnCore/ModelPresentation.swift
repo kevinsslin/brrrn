@@ -49,14 +49,19 @@ public struct ModelPresentation: Sendable, Equatable {
 
     private static func suffix(for speed: String?) -> String? {
         let normalized = speed?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        switch normalized {
-        case "", "default", "standard", "none":
-            return nil
-        case "xhigh", "x-high":
-            return "x-high"
-        default:
-            return normalized.replacingOccurrences(of: "_", with: "-")
+        // Variants can stack ("xhigh priority"); normalize each word and
+        // drop the ones that mean "nothing notable".
+        let parts = normalized.split(separator: " ").compactMap { part -> String? in
+            switch part {
+            case "", "default", "standard", "none":
+                nil
+            case "xhigh", "x-high":
+                "x-high"
+            default:
+                part.replacingOccurrences(of: "_", with: "-")
+            }
         }
+        return parts.isEmpty ? nil : parts.joined(separator: " ")
     }
 }
 

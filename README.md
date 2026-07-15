@@ -165,6 +165,8 @@ Known pricing gaps:
 - Models with no public LiteLLM price show `n/a` cost.
 - Claude fast rows remain separate, but use standard pricing until a distinct
   public fast-mode price is available.
+- Codex priority service tier is shown in the variant ("(x-high priority)")
+  but priced at standard rates until LiteLLM publishes tier pricing.
 
 ## Timezone model
 

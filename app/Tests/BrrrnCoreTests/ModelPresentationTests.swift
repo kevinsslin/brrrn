@@ -24,6 +24,18 @@ final class ModelPresentationTests: XCTestCase {
         )
     }
 
+    func testStackedVariantsNormalizePerWord() {
+        XCTAssertEqual(
+            ModelPresentation(source: "codex", speed: "xhigh priority").variantSuffix,
+            "x-high priority"
+        )
+        // A priority tier on default effort still shows.
+        XCTAssertEqual(
+            ModelPresentation(source: "codex", speed: "default priority").variantSuffix,
+            "priority"
+        )
+    }
+
     func testUnknownValuesRemainReadable() {
         let presentation = ModelPresentation(source: "other", speed: "very_high")
         XCTAssertEqual(presentation.provider, .unknown)
