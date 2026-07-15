@@ -7,6 +7,7 @@ import BrrrnCore
 struct BurnTrendChart: View {
     let points: [BurnTrendPoint]
     let streakThresholdUSD: Double
+    var days: Binding<Int>?
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedDateKey: String?
@@ -135,14 +136,20 @@ struct BurnTrendChart: View {
     }
 
     private var caption: some View {
-        HStack(spacing: 4) {
+        HStack(spacing: 6) {
             if let peak, peak.costUSD > 0 {
                 Text("Peak \(Format.money(peak.costUSD)) on \(Format.utcMonthDay(peak.date))")
             } else {
                 Text("No burn in this window")
             }
             Spacer()
-            Text("last \(points.count)d, UTC")
+            if let days {
+                Text("last")
+                RangePicker(selection: days, options: [14, 30, 90])
+                Text("UTC")
+            } else {
+                Text("last \(points.count)d, UTC")
+            }
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -166,6 +173,8 @@ struct BurnTrendChart: View {
 struct BurnRhythmChart: View {
     let rhythm: BurnRhythm
     let timeZone: TimeZone
+    var lookbackDays: Binding<Int>?
+    var usesUTC: Binding<Bool>?
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedHour: Int?
@@ -307,9 +316,26 @@ struct BurnRhythmChart: View {
                     .fill(Color.secondary.opacity(0.35))
                     .frame(width: 8, height: 8)
                 Text("Typical (\(rhythm.activeDays)d avg)")
+                if let lookbackDays {
+                    RangePicker(selection: lookbackDays, options: [7, 30, 90])
+                }
             }
             Spacer()
-            Text("\(zoneLabel) hours")
+            if let usesUTC {
+                Button {
+                    usesUTC.wrappedValue.toggle()
+                } label: {
+                    Text("\(zoneLabel) hours")
+                        .font(.caption2.weight(.semibold))
+                        .padding(.horizontal, 6)
+                        .padding(.vertical, 3)
+                        .background(.quaternary, in: Capsule())
+                }
+                .buttonStyle(.plain)
+                .help("Switch the rhythm clock between your timezone and UTC")
+            } else {
+                Text("\(zoneLabel) hours")
+            }
         }
         .font(.caption2)
         .foregroundStyle(.secondary)
@@ -321,5 +347,27 @@ struct BurnRhythmChart: View {
         }
         return "Burn rhythm by hour. Typical peak at \(peak):00 \(zoneLabel), "
             + "\(Format.money(rhythm.typicalByHour[peak])) on an average day."
+    }
+}
+
+/// Compact window cycler shown inside chart captions: click to advance
+/// through the options.
+struct RangePicker: View {
+    @Binding var selection: Int
+    let options: [Int]
+
+    var body: some View {
+        Button {
+            let index = options.firstIndex(of: selection) ?? 0
+            selection = options[(index + 1) % options.count]
+        } label: {
+            Text("\(selection)d")
+                .font(.caption2.weight(.semibold))
+                .padding(.horizontal, 6)
+                .padding(.vertical, 3)
+                .background(.quaternary, in: Capsule())
+        }
+        .buttonStyle(.plain)
+        .help("Cycle the window: \(options.map { "\($0)d" }.joined(separator: " / "))")
     }
 }

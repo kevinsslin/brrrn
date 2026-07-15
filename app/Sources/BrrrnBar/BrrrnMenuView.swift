@@ -151,30 +151,13 @@ private struct AnalyticsSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            HStack(spacing: 8) {
-                TabStrip(
-                    selection: $tabRaw,
-                    options: AnalyticsTab.allCases.map { ($0.rawValue, $0.label) }
-                )
-
-                if tab == .trend {
-                    RangePicker(selection: $trendDays, options: [14, 30, 90])
-                }
-                if tab == .rhythm {
-                    RangePicker(selection: $rhythmLookback, options: [7, 30, 90])
-                    Button {
-                        rhythmUsesUTC.toggle()
-                    } label: {
-                        Text(rhythmUsesUTC ? "UTC" : Format.timeZoneLabel(.current))
-                            .font(.caption2.weight(.semibold))
-                            .padding(.horizontal, 6)
-                            .padding(.vertical, 3)
-                            .background(.quaternary, in: Capsule())
-                    }
-                    .buttonStyle(.plain)
-                    .help("Switch the rhythm clock between your timezone and UTC")
-                }
-            }
+            // The tab strip must stay identical across tabs: per-tab controls
+            // live inside each chart's caption line, so nothing here resizes
+            // or shifts when switching.
+            TabStrip(
+                selection: $tabRaw,
+                options: AnalyticsTab.allCases.map { ($0.rawValue, $0.label) }
+            )
 
             switch tab {
             case .calendar:
@@ -189,7 +172,8 @@ private struct AnalyticsSection: View {
             case .trend:
                 BurnTrendChart(
                     points: BurnAnalytics.trend(entries: daily, days: trendDays),
-                    streakThresholdUSD: thresholdUSD
+                    streakThresholdUSD: thresholdUSD,
+                    days: $trendDays
                 )
             case .rhythm:
                 let rhythm = BurnAnalytics.rhythm(
@@ -198,7 +182,12 @@ private struct AnalyticsSection: View {
                     timeZone: rhythmTimeZone
                 )
                 if rhythm.hasData {
-                    BurnRhythmChart(rhythm: rhythm, timeZone: rhythmTimeZone)
+                    BurnRhythmChart(
+                        rhythm: rhythm,
+                        timeZone: rhythmTimeZone,
+                        lookbackDays: $rhythmLookback,
+                        usesUTC: $rhythmUsesUTC
+                    )
                 } else {
                     RhythmUnavailable()
                 }
@@ -206,26 +195,6 @@ private struct AnalyticsSection: View {
                 RecordsView(records: BurnAnalytics.records(entries: daily, thresholdUSD: thresholdUSD))
             }
         }
-    }
-}
-
-private struct RangePicker: View {
-    @Binding var selection: Int
-    let options: [Int]
-
-    var body: some View {
-        Button {
-            let index = options.firstIndex(of: selection) ?? 0
-            selection = options[(index + 1) % options.count]
-        } label: {
-            Text("\(selection)d")
-                .font(.caption2.weight(.semibold))
-                .padding(.horizontal, 6)
-                .padding(.vertical, 3)
-                .background(.quaternary, in: Capsule())
-        }
-        .buttonStyle(.plain)
-        .help("Cycle the window: \(options.map { "\($0)d" }.joined(separator: " / "))")
     }
 }
 
