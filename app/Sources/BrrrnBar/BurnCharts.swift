@@ -315,9 +315,10 @@ struct BurnRhythmChart: View {
                 RoundedRectangle(cornerRadius: 1.5)
                     .fill(Color.secondary.opacity(0.35))
                     .frame(width: 8, height: 8)
-                Text("Typical (\(rhythm.activeDays)d avg)")
+                Text("Typical avg")
                 if let lookbackDays {
                     RangePicker(selection: lookbackDays, options: [7, 30, 90])
+                        .help("Averaged over the \(rhythm.activeDays) active days in this window")
                 }
             }
             Spacer()

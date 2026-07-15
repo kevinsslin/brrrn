@@ -36,6 +36,16 @@ public enum LocalEngine {
         try await report(binary: binary, arguments: ["--period", "week", "--json"])
     }
 
+    /// `brrrn --period today --json`
+    public static func todayReport(binary: String) async throws -> BurnReport {
+        try await report(binary: binary, arguments: ["--period", "today", "--json"])
+    }
+
+    /// `brrrn --period month --json`
+    public static func monthReport(binary: String) async throws -> BurnReport {
+        try await report(binary: binary, arguments: ["--period", "month", "--json"])
+    }
+
     public static func report(binary: String, arguments: [String]) async throws -> BurnReport {
         let data = try await run(binary: binary, arguments: arguments)
         guard !data.isEmpty else { throw EngineError.emptyOutput }

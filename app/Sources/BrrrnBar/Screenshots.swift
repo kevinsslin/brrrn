@@ -82,6 +82,8 @@ enum ScreenshotGenerator {
         let daily = fixtureDaily()
         model.report = fixtureReport(daily: daily)
         model.weekReport = model.report
+        model.todayReport = scaledReport(model.report!, factor: 0.18)
+        model.monthReport = scaledReport(model.report!, factor: 3.6)
         model.lastUpdated = Date()
         if !empty {
             model.boards = [fixtureBoard()]
@@ -200,6 +202,19 @@ enum ScreenshotGenerator {
             }
         }
         return run
+    }
+
+    private static func scaledReport(_ report: BurnReport, factor: Double) -> BurnReport {
+        var scaled = report
+        scaled.byModel = report.byModel.map { usage in
+            var entry = usage
+            entry.costUSD = usage.costUSD.map { ($0 * factor * 100).rounded() / 100 }
+            entry.inputTokens = Int(Double(usage.inputTokens) * factor)
+            entry.outputTokens = Int(Double(usage.outputTokens) * factor)
+            entry.totalTokens = Int(Double(usage.totalTokens) * factor)
+            return entry
+        }
+        return scaled
     }
 
     private static func fixtureBoard() -> PitBoard {

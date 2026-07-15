@@ -13,6 +13,8 @@ final class AppModel: ObservableObject {
 
     @Published var report: BurnReport?
     @Published var weekReport: BurnReport?
+    @Published var todayReport: BurnReport?
+    @Published var monthReport: BurnReport?
     @Published var boards: [PitBoard] = []
     @Published var selection: Selection?
     @Published var isRefreshing = false
@@ -32,8 +34,27 @@ final class AppModel: ObservableObject {
         report.map { Format.money($0.windows.today.costUSD) }
     }
 
-    var weekModels: [BurnReport.ModelUsage] {
-        Array(ModelSort.byCostDescending(weekReport?.byModel ?? []).prefix(8))
+    enum ModelPeriod: String, CaseIterable {
+        case today
+        case week
+        case month
+
+        var label: String {
+            switch self {
+            case .today: "Today"
+            case .week: "Week"
+            case .month: "Month"
+            }
+        }
+    }
+
+    func models(for period: ModelPeriod) -> [BurnReport.ModelUsage] {
+        let source = switch period {
+        case .today: todayReport
+        case .week: weekReport
+        case .month: monthReport
+        }
+        return Array(ModelSort.byCostDescending(source?.byModel ?? []).prefix(8))
     }
 
     /// Fixture injection for the screenshot generator; nil in normal runs.
@@ -85,9 +106,13 @@ final class AppModel: ObservableObject {
         do {
             async let all = LocalEngine.allTimeReport(binary: binary)
             async let week = LocalEngine.weekReport(binary: binary)
-            let (newReport, newWeek) = try await (all, week)
+            async let day = LocalEngine.todayReport(binary: binary)
+            async let month = LocalEngine.monthReport(binary: binary)
+            let (newReport, newWeek, newDay, newMonth) = try await (all, week, day, month)
             report = newReport
             weekReport = newWeek
+            todayReport = newDay
+            monthReport = newMonth
             errorMessage = nil
             lastUpdated = Date()
         } catch {

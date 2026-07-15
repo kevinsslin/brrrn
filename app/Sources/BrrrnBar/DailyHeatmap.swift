@@ -5,13 +5,16 @@ struct DailyHeatmap: View {
     let title: String
     let grid: UTCActivityGrid
     var showsTable = true
+    /// Analytics-tab styling: the tab itself already says "Calendar", so the
+    /// title row goes away and the grid tightens up.
+    var compact = false
 
     @Environment(\.colorScheme) private var colorScheme
     @State private var selectedDateKey: String?
     @FocusState private var isFocused: Bool
 
-    private let cellSize: CGFloat = 14
-    private let cellGap: CGFloat = 3
+    private var cellSize: CGFloat { compact ? 12 : 14 }
+    private var cellGap: CGFloat { compact ? 2 : 3 }
 
     private var selectedCell: DailyActivityCell {
         grid.cells.first(where: { $0.dateKey == selectedDateKey })
@@ -31,8 +34,10 @@ struct DailyHeatmap: View {
     }
 
     private var calendar: some View {
-        VStack(alignment: .leading, spacing: 8) {
-            header
+        VStack(alignment: .leading, spacing: compact ? 6 : 8) {
+            if !compact {
+                header
+            }
             detailStrip
             monthLabels
             HStack(alignment: .top, spacing: 7) {
@@ -84,6 +89,12 @@ struct DailyHeatmap: View {
                     .lineLimit(1)
             }
             Spacer(minLength: 8)
+            if compact {
+                Label("\(grid.currentStreakDays)d", systemImage: "flame.fill")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.orange)
+                    .padding(.trailing, 2)
+            }
             VStack(alignment: .trailing, spacing: 2) {
                 Text(Format.money(selectedCell.costUSD))
                     .font(.callout.weight(.semibold))
@@ -93,7 +104,7 @@ struct DailyHeatmap: View {
             }
             .monospacedDigit()
         }
-        .frame(minHeight: 36)
+        .frame(minHeight: compact ? 30 : 36)
     }
 
     private var monthLabels: some View {

@@ -63,7 +63,7 @@ struct BrrrnMenuView: View {
                 }
             }
             Divider()
-            ModelSection(models: model.weekModels)
+            ModelSection(model: model)
             Divider()
             PitSections(model: model) { showPitSetup = true }
         }
@@ -167,7 +167,8 @@ private struct AnalyticsSection: View {
                         entries: daily,
                         weeks: 12,
                         thresholdUSD: thresholdUSD
-                    )
+                    ),
+                    compact: true
                 )
             case .trend:
                 BurnTrendChart(
@@ -336,11 +337,18 @@ private struct SourceValue: View {
 }
 
 private struct ModelSection: View {
-    let models: [BurnReport.ModelUsage]
+    @ObservedObject var model: AppModel
 
     @AppStorage("modelsExpanded") private var isExpanded = false
+    @AppStorage("modelsPeriod") private var periodRaw = AppModel.ModelPeriod.week.rawValue
 
     private static let collapsedCount = 3
+
+    private var period: AppModel.ModelPeriod {
+        AppModel.ModelPeriod(rawValue: periodRaw) ?? .week
+    }
+
+    private var models: [BurnReport.ModelUsage] { model.models(for: period) }
 
     private var hidden: Int { max(0, models.count - Self.collapsedCount) }
 
@@ -350,12 +358,20 @@ private struct ModelSection: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
-            Text("THIS WEEK BY MODEL")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(1.2)
+            HStack {
+                Text("BY MODEL")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.2)
+                Spacer()
+                TabStrip(
+                    selection: $periodRaw,
+                    options: AppModel.ModelPeriod.allCases.map { ($0.rawValue, $0.label) }
+                )
+                .fixedSize()
+            }
             if models.isEmpty {
-                Text("No model usage this week")
+                Text("No model usage \(period == .today ? "today" : "this \(period.rawValue)")")
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
