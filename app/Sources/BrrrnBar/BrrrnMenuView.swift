@@ -228,7 +228,7 @@ private struct RecordsView: View {
                         value: Format.money(hour.costUSD),
                         detail: Format.monthDayHour(hour.date, in: .current)
                             + " \(Format.timeZoneLabel(.current))",
-                        isCurrent: hour.isCurrent
+                        badge: hour.isCurrent ? "SET TODAY" : nil
                     )
                 }
                 if let day = records.bestDay {
@@ -237,7 +237,7 @@ private struct RecordsView: View {
                         title: "Biggest day",
                         value: Format.money(day.costUSD),
                         detail: Format.utcMonthDay(day.date) + " UTC",
-                        isCurrent: day.isCurrent
+                        badge: day.isCurrent ? "SET TODAY" : nil
                     )
                 }
                 if records.longestStreakDays > 0 {
@@ -250,7 +250,7 @@ private struct RecordsView: View {
                                 ? "still going"
                                 : "ended \(Format.utcMonthDay($0)) UTC"
                         } ?? "",
-                        isCurrent: records.longestStreakIsCurrent
+                        badge: records.longestStreakIsCurrent ? "ONGOING" : nil
                     )
                 }
                 Text("Day and streak records use UTC days, the same clock the pit board ranks on.")
@@ -266,7 +266,8 @@ private struct RecordRow: View {
     let title: String
     let value: String
     let detail: String
-    let isCurrent: Bool
+    /// "SET TODAY" / "ONGOING" when the record is being made right now.
+    var badge: String?
 
     var body: some View {
         HStack(spacing: 9) {
@@ -282,8 +283,8 @@ private struct RecordRow: View {
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
-            if isCurrent {
-                Text("PR NOW")
+            if let badge {
+                Text(badge)
                     .font(.caption2.weight(.bold))
                     .foregroundStyle(.orange)
                     .padding(.horizontal, 6)
@@ -295,7 +296,7 @@ private struct RecordRow: View {
                 .monospacedDigit()
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel("\(title), \(value), \(detail)\(isCurrent ? ", record in progress" : "")")
+        .accessibilityLabel("\(title), \(value), \(detail)\(badge.map { ", \($0.lowercased())" } ?? "")")
     }
 }
 

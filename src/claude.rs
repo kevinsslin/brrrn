@@ -101,12 +101,25 @@ pub fn scan_file(
 
         claimed.push(hash);
         local_claims.insert(hash);
+        // Claude Code transcripts record `usage.speed` today; reasoning
+        // effort is not written to session logs (unlike Codex). If a future
+        // version starts logging it, pick it up without a release.
+        let effort = usage["effort"]
+            .as_str()
+            .or_else(|| usage["reasoning_effort"].as_str())
+            .or_else(|| msg["effort_level"].as_str());
+        let speed = usage["speed"].as_str().unwrap_or("standard");
+        let variant = match effort {
+            Some(effort) if speed == "standard" => effort.to_string(),
+            Some(effort) => format!("{speed} {effort}"),
+            None => speed.to_string(),
+        };
         entries.push(Entry {
             date,
             hour,
             source: Source::Claude,
             model: model.to_string(),
-            speed: usage["speed"].as_str().unwrap_or("standard").to_string(),
+            speed: variant,
             usage: u,
         });
     }
@@ -181,6 +194,20 @@ mod tests {
         // flat cache_creation_input_tokens lands in the 5m bucket
         assert_eq!(e2.usage.cache_w5m, 30);
         assert_eq!(e2.usage.cache_w1h, 0);
+    }
+
+    #[test]
+    fn future_effort_fields_flow_into_the_variant() {
+        let content = [
+            msg_line("e1", "r1", "claude-fable-5", r#","effort":"high""#),
+            msg_line("e2", "r2", "claude-fable-5", r#","speed":"fast","reasoning_effort":"max""#),
+        ]
+        .join("\n");
+        let path = fixture("effort.jsonl", &content);
+
+        let (entries, _, _, _) = scan_file(&path, &mut HashSet::new(), true);
+        assert_eq!(entries[0].speed, "high");
+        assert_eq!(entries[1].speed, "fast max");
     }
 
     #[test]

@@ -191,25 +191,33 @@ struct BurnRhythmChart: View {
         }
     }
 
-    private var shownHour: Int? {
-        if let selectedHour { return selectedHour }
-        return rhythm.peakTypicalHour
+    /// The hour of day right now, on the chart's clock. Anchoring the idle
+    /// readout to the present ("this hour, so far") reads naturally; the old
+    /// default (typical peak hour with today often $0) looked broken.
+    private var currentHour: Int {
+        BurnAnalytics.calendar(in: timeZone).component(.hour, from: Date())
+    }
+
+    private var shownHour: Int {
+        selectedHour ?? currentHour
     }
 
     private var readout: some View {
-        HStack(alignment: .firstTextBaseline) {
+        let hour = shownHour
+        let isNow = selectedHour == nil || selectedHour == currentHour
+        return HStack(alignment: .firstTextBaseline) {
             VStack(alignment: .leading, spacing: 2) {
-                Text(shownHour.map { String(format: "%02d:00-%02d:59 \(zoneLabel)", $0, $0) } ?? "No data")
+                Text(String(format: "%02d:00-%02d:59 \(zoneLabel)", hour, hour))
                     .font(.caption.weight(.medium))
-                Text(selectedHour == nil ? "Typical peak hour" : "Hovered hour")
+                Text(isNow ? "This hour, so far" : "Hovered hour")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
             Spacer(minLength: 8)
             VStack(alignment: .trailing, spacing: 2) {
-                Text("today \(Format.money(shownHour.map { rhythm.todayByHour[$0] } ?? 0))")
+                Text("\(isNow ? "now" : "today") \(Format.money(rhythm.todayByHour[hour]))")
                     .font(.callout.weight(.semibold))
-                Text("typical \(Format.money(shownHour.map { rhythm.typicalByHour[$0] } ?? 0))")
+                Text("typical \(Format.money(rhythm.typicalByHour[hour]))/hr")
                     .font(.caption2)
                     .foregroundStyle(.secondary)
             }
