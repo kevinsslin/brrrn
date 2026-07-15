@@ -225,7 +225,9 @@ final class AppModel: ObservableObject {
         await refresh(forcePit: true)
     }
 
-    /// Update the display name everywhere; boards refresh to show it.
+    /// Update the display name everywhere. The hub call is the only thing
+    /// awaited (~a second per pit); boards are patched locally for instant
+    /// feedback and the full refresh runs in the background.
     func renameDisplay(to name: String) async throws {
         guard let binary = BinaryLocator().locate() else {
             throw EngineError.binaryNotFound
@@ -233,7 +235,15 @@ final class AppModel: ObservableObject {
         try await configStore.serialize {
             try await LocalEngine.renameDisplay(binary: binary, to: name)
         }
-        await refresh(forcePit: true)
+        if let handle = config?.handle {
+            for boardIndex in boards.indices {
+                for memberIndex in boards[boardIndex].members.indices
+                where boards[boardIndex].members[memberIndex].handle == handle {
+                    boards[boardIndex].members[memberIndex].displayName = name
+                }
+            }
+        }
+        Task { await refresh(forcePit: true) }
     }
 
     func openMember(pitCode: String, member: PitBoard.Member) async {
