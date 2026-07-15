@@ -3,13 +3,14 @@ import BrrrnCore
 
 /// In-app crew setup: start a pit or join one with a code, no terminal
 /// needed. The heavy lifting (handle claim, secret, config write, backfill)
-/// stays in the CLI, which this drives.
-struct PitSetupSheet: View {
+/// stays in the CLI, which this drives. Rendered inline in the menu window
+/// (a sheet would steal key status and close the MenuBarExtra popover).
+struct PitSetupView: View {
     @ObservedObject var model: AppModel
     /// Screenshot generator: AppKit-backed text fields cannot offscreen-
     /// render, so this swaps them for static lookalikes.
     var snapshotMode = false
-    @Environment(\.dismiss) private var dismiss
+    let onClose: () -> Void
 
     private enum Mode: String, CaseIterable {
         case create = "Start a pit"
@@ -40,23 +41,35 @@ struct PitSetupSheet: View {
     }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: 14) {
-            if let createdCode {
-                success(code: createdCode)
-            } else {
-                form
+        VStack(spacing: 0) {
+            HStack {
+                Button(action: onClose) {
+                    Label("Back", systemImage: "chevron.left")
+                }
+                .buttonStyle(.plain)
+                .keyboardShortcut(.cancelAction)
+                Spacer()
+                Text("FRIENDS").font(.headline)
+                Spacer()
+                Color.clear.frame(width: 45)
             }
+            .padding(14)
+            Divider()
+
+            VStack(alignment: .leading, spacing: 14) {
+                if let createdCode {
+                    success(code: createdCode)
+                } else {
+                    form
+                }
+            }
+            .padding(18)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
-        .padding(18)
-        .frame(width: 300)
     }
 
     private var form: some View {
         Group {
-            Text("FRIENDS")
-                .font(.caption.weight(.semibold))
-                .foregroundStyle(.secondary)
-                .tracking(1.2)
 
             TabStrip(
                 selection: $mode,
@@ -85,8 +98,6 @@ struct PitSetupSheet: View {
             }
 
             HStack {
-                Button("Cancel") { dismiss() }
-                    .keyboardShortcut(.cancelAction)
                 Spacer()
                 Button {
                     Task { await submit() }
@@ -154,7 +165,7 @@ struct PitSetupSheet: View {
             }
             .padding(10)
             .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 8))
-            Button("Done") { dismiss() }
+            Button("Done") { onClose() }
                 .keyboardShortcut(.defaultAction)
                 .frame(maxWidth: .infinity, alignment: .trailing)
         }
@@ -177,7 +188,7 @@ struct PitSetupSheet: View {
                     code: code.trimmingCharacters(in: .whitespaces).lowercased(),
                     handle: effectiveHandle
                 )
-                dismiss()
+                onClose()
             }
         } catch {
             errorText = error.localizedDescription

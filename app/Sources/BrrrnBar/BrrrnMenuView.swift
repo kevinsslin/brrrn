@@ -18,6 +18,10 @@ struct BrrrnMenuView: View {
                 ) {
                     model.closeMember()
                 }
+            } else if showPitSetup {
+                // Inline page, not a sheet: presenting a sheet steals key
+                // status from the MenuBarExtra window and closes the menu.
+                PitSetupView(model: model) { showPitSetup = false }
             } else {
                 mainContent
             }
@@ -35,9 +39,6 @@ struct BrrrnMenuView: View {
                 ScrollView { sections }
             }
             Footer(model: model) { showPitSetup = true }
-        }
-        .sheet(isPresented: $showPitSetup) {
-            PitSetupSheet(model: model)
         }
         .overlay {
             if model.report == nil && model.isRefreshing {

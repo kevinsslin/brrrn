@@ -51,7 +51,8 @@ enum ScreenshotGenerator {
         )
 
         try render(
-            PitSetupSheet(model: fixtureModel(empty: true), snapshotMode: true),
+            PitSetupView(model: fixtureModel(empty: true), snapshotMode: true, onClose: {})
+                .frame(width: 390),
             to: directory.appendingPathComponent("pit-setup.png")
         )
     }
