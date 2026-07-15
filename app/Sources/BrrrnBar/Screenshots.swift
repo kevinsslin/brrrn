@@ -33,6 +33,7 @@ enum ScreenshotGenerator {
         defaults.set(30, forKey: "rhythmLookback")
         defaults.set(true, forKey: "modelsExpanded")
 
+        defaults.set("me", forKey: "rootTab")
         let tabs = ["calendar", "trend", "rhythm", "records"]
         for tab in tabs {
             defaults.set(tab, forKey: "analyticsTab")
@@ -41,6 +42,13 @@ enum ScreenshotGenerator {
                 to: directory.appendingPathComponent("menu-\(tab).png")
             )
         }
+
+        defaults.set("pits", forKey: "rootTab")
+        try render(
+            BrrrnMenuView(model: model, snapshotMode: true).frame(width: 390),
+            to: directory.appendingPathComponent("menu-friends.png")
+        )
+        defaults.set("me", forKey: "rootTab")
 
         defaults.set("calendar", forKey: "analyticsTab")
         let memberModel = fixtureModel()
@@ -86,7 +94,7 @@ enum ScreenshotGenerator {
         model.monthReport = scaledReport(model.report!, factor: 3.6)
         model.lastUpdated = Date()
         if !empty {
-            model.boards = [fixtureBoard()]
+            model.boards = fixtureBoards()
             model.configOverride = BrrrnConfig(hubURL: "https://hub.example", handle: "kevin", pits: ["ember-fox-7k2m"])
         } else {
             model.configOverride = BrrrnConfig(hubURL: "https://hub.example", handle: "", pits: [])
@@ -218,6 +226,23 @@ enum ScreenshotGenerator {
             return entry
         }
         return scaled
+    }
+
+    private static func fixtureBoards() -> [PitBoard] {
+        [
+            fixtureBoard(),
+            PitBoard(
+                name: "ship it friday",
+                code: "cinder-owl-9p4d",
+                streakThresholdUSD: 5,
+                members: [
+                    .init(handle: "kevin", todayUSD: 213.40, weekUSD: 1_402.11, monthUSD: 4_799.63,
+                          streakDays: 11, topModel: "claude-fable-5"),
+                    .init(handle: "june", todayUSD: 44.02, weekUSD: 511.87, monthUSD: 1_882.44,
+                          streakDays: 6, topModel: "gpt-5.6-sol"),
+                ]
+            ),
+        ]
     }
 
     private static func fixtureBoard() -> PitBoard {

@@ -13,13 +13,13 @@ No global leaderboard. No accounts. No prompts ever leave your Mac.
 
 ## What it looks like
 
-| Burn calendar + crew board | 30-day trend | Hour-of-day rhythm |
+| Burn calendar + models | 30-day trend | Hour-of-day rhythm |
 |:--:|:--:|:--:|
-| ![Burn calendar, weekly model costs, and the private pit board](docs/screenshots/menu-calendar.png) | ![30-day burn trend with crosshair readout](docs/screenshots/menu-trend.png) | ![Today's burn per hour against your typical day, in your timezone](docs/screenshots/menu-rhythm.png) |
+| ![Burn calendar with day detail and weekly model costs](docs/screenshots/menu-calendar.png) | ![30-day burn trend with crosshair readout](docs/screenshots/menu-trend.png) | ![Today's burn per hour against your typical day, in your timezone](docs/screenshots/menu-rhythm.png) |
 
-| Personal records | Friend drill-down | Join a crew in-app |
+| Your crews | Personal records | Friend drill-down |
 |:--:|:--:|:--:|
-| ![Gym-style PRs: biggest hour, biggest day, longest streak](docs/screenshots/menu-records.png) | ![A friend's 16-week burn calendar and weekly stats](docs/screenshots/member-detail.png) | ![Start or join a pit without touching a terminal](docs/screenshots/pit-setup.png) |
+| ![Private pit boards with avatars, streaks, and invite codes](docs/screenshots/menu-friends.png) | ![Gym-style PRs: biggest hour, biggest day, longest streak](docs/screenshots/menu-records.png) | ![A friend's 16-week burn calendar and weekly stats](docs/screenshots/member-detail.png) |
 
 Screenshots are rendered from the real views with demo data and stay in sync
 with the code: `cd app && swift build && .build/debug/BrrrnBar --screenshots

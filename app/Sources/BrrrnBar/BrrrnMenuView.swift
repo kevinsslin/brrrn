@@ -30,9 +30,14 @@ struct BrrrnMenuView: View {
     }
 
     @State private var showPitSetup = false
+    @AppStorage("rootTab") private var rootTabRaw = "me"
 
     private var mainContent: some View {
         VStack(spacing: 0) {
+            TabStrip(selection: $rootTabRaw, options: [("me", "Me"), ("pits", "Friends")])
+                .padding(.horizontal, 18)
+                .padding(.top, 12)
+                .padding(.bottom, 2)
             if snapshotMode {
                 sections
             } else {
@@ -51,24 +56,26 @@ struct BrrrnMenuView: View {
 
     private var sections: some View {
         VStack(alignment: .leading, spacing: 18) {
-            MeHeader(report: model.report)
-            if let report = model.report {
-                if let daily = report.daily {
-                    AnalyticsSection(
-                        daily: daily,
-                        thresholdUSD: report.streak?.thresholdUSD ?? StreakPolicy.defaultThresholdUSD
-                    )
-                } else {
-                    BurnCalendarUnavailable()
+            if rootTabRaw == "pits" {
+                PitSections(model: model) { showPitSetup = true }
+            } else {
+                MeHeader(report: model.report)
+                if let report = model.report {
+                    if let daily = report.daily {
+                        AnalyticsSection(
+                            daily: daily,
+                            thresholdUSD: report.streak?.thresholdUSD ?? StreakPolicy.defaultThresholdUSD
+                        )
+                    } else {
+                        BurnCalendarUnavailable()
+                    }
                 }
+                Divider()
+                ModelSection(model: model)
             }
-            Divider()
-            ModelSection(model: model)
-            Divider()
-            PitSections(model: model) { showPitSetup = true }
         }
         .padding(18)
-        .frame(maxHeight: .infinity, alignment: .top)
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
     }
 }
 
@@ -560,6 +567,8 @@ private struct FriendsEmptyState: View {
 private struct PitBoardView: View {
     let board: PitBoard
     @ObservedObject var model: AppModel
+    @State private var showInvite = false
+    @State private var copiedInvite = false
 
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
@@ -567,6 +576,41 @@ private struct PitBoardView: View {
                 Text((board.name?.isEmpty == false ? board.name : nil) ?? board.code)
                     .font(.headline)
                 Spacer()
+                Button {
+                    showInvite.toggle()
+                } label: {
+                    Image(systemName: "person.crop.circle.badge.plus")
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                }
+                .buttonStyle(.plain)
+                .help("Show this pit's invite code")
+                .popover(isPresented: $showInvite, arrowEdge: .bottom) {
+                    VStack(alignment: .leading, spacing: 8) {
+                        Text("INVITE CODE")
+                            .font(.caption2.weight(.semibold))
+                            .foregroundStyle(.secondary)
+                            .tracking(1.1)
+                        HStack(spacing: 10) {
+                            Text(board.code)
+                                .font(.title3.weight(.semibold).monospaced())
+                                .textSelection(.enabled)
+                            Button {
+                                NSPasteboard.general.clearContents()
+                                NSPasteboard.general.setString(board.code, forType: .string)
+                                copiedInvite = true
+                            } label: {
+                                Label(copiedInvite ? "Copied" : "Copy",
+                                      systemImage: copiedInvite ? "checkmark" : "doc.on.doc")
+                            }
+                        }
+                        Text("Anyone with this code can join and see the board.")
+                            .font(.caption2)
+                            .foregroundStyle(.tertiary)
+                    }
+                    .padding(14)
+                    .onDisappear { copiedInvite = false }
+                }
                 Text("UTC")
                     .font(.caption2.weight(.semibold))
                     .foregroundStyle(.secondary)
