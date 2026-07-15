@@ -200,7 +200,12 @@ mod tests {
     fn future_effort_fields_flow_into_the_variant() {
         let content = [
             msg_line("e1", "r1", "claude-fable-5", r#","effort":"high""#),
-            msg_line("e2", "r2", "claude-fable-5", r#","speed":"fast","reasoning_effort":"max""#),
+            msg_line(
+                "e2",
+                "r2",
+                "claude-fable-5",
+                r#","speed":"fast","reasoning_effort":"max""#,
+            ),
         ]
         .join("\n");
         let path = fixture("effort.jsonl", &content);

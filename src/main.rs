@@ -116,9 +116,7 @@ enum PitAction {
         pit: Option<String>,
     },
     /// Change your display name on every joined pit (handle never changes)
-    Rename {
-        display: String,
-    },
+    Rename { display: String },
 }
 
 #[derive(ClapArgs)]
@@ -301,9 +299,11 @@ fn run_config(cli: &Cli, action: &ConfigAction) -> Result<(), String> {
 fn run_pit(cli: &Cli, args: &PitArgs) -> Result<(), String> {
     match &args.action {
         Some(PitAction::New { name, token }) => pit_new(cli, name.as_deref(), token.as_deref()),
-        Some(PitAction::Join { code, handle, display }) => {
-            pit_join(cli, code, handle, display.as_deref())
-        }
+        Some(PitAction::Join {
+            code,
+            handle,
+            display,
+        }) => pit_join(cli, code, handle, display.as_deref()),
         Some(PitAction::Show { handle, pit }) => pit_show(cli, handle, pit.as_deref()),
         Some(PitAction::Rename { display }) => pit_rename(cli, display),
         None => pit_board(cli),
@@ -401,7 +401,10 @@ fn pit_rename(cli: &Cli, display: &str) -> Result<(), String> {
         }
         println!("renamed on {code}");
     }
-    println!("display name is now \"{display}\" (handle stays {})", config.handle);
+    println!(
+        "display name is now \"{display}\" (handle stays {})",
+        config.handle
+    );
     Ok(())
 }
 
