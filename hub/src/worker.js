@@ -395,6 +395,33 @@ async function joinPit(request, env, storage, code, now) {
   return json({ ok: true });
 }
 
+// Any authenticated member can retitle the pit: the trust model is "your
+// friends", and pits deliberately have no admin tier.
+async function renamePit(request, env, storage, code) {
+  if (!(await pitExists(env.BRRRN_KV, code))) return error('pit not found', 404);
+  if (!(await enforceJoinLimit(request, storage, env))) return error('too many attempts', 429);
+
+  const parsed = await readObject(request);
+  if (parsed.error) return error(parsed.error, parsed.status);
+  const handle = normalizeHandle(parsed.value.handle);
+  const secret = parsed.value.secret;
+  if (!handle || typeof secret !== 'string' || !secret) {
+    return error('member credentials required', 401);
+  }
+  const member = await env.BRRRN_KV.get(`member:${code}:${handle}`, 'json');
+  if (!member) return error('member not found', 404);
+  if (await sha256(secret) !== member.secret_hash) return error('invalid secret', 401);
+
+  const name = typeof parsed.value.name === 'string' ? parsed.value.name.trim() : '';
+  const length = [...name].length;
+  if (length < 1 || length > 80 || /\p{Cc}/u.test(name)) {
+    return error('name must be 1-80 characters');
+  }
+  const pit = await env.BRRRN_KV.get(`pit:${code}`, 'json');
+  await env.BRRRN_KV.put(`pit:${code}`, JSON.stringify({ ...pit, name }));
+  return json({ ok: true });
+}
+
 function validMachineId(value) {
   return typeof value === 'string' && /^[a-zA-Z0-9_-]{1,64}$/.test(value);
 }
@@ -1290,6 +1317,11 @@ async function coordinatedRoute(request, env, storage) {
     return submitDays(request, env, storage, match[1]);
   }
 
+  match = path.match(/^\/pit\/([^/]+)\/rename$/);
+  if (request.method === 'POST' && match) {
+    return renamePit(request, env, storage, match[1]);
+  }
+
   return error('not found', 404);
 }
 
@@ -1523,7 +1555,7 @@ async function route(request, env) {
     return coordinatedFetch(request, env);
   }
 
-  let match = path.match(/^\/pit\/([^/]+)\/(join|submit)$/);
+  let match = path.match(/^\/pit\/([^/]+)\/(join|submit|rename)$/);
   if (request.method === 'POST' && match) {
     const buffered = await bufferCoordinatedRequest(request, false);
     return buffered.response ?? coordinatedFetch(buffered.request, env);

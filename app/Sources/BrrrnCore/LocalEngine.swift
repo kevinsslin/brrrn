@@ -63,6 +63,11 @@ public enum LocalEngine {
         _ = try await run(binary: binary, arguments: ["pit", "rename", name])
     }
 
+    /// `brrrn pit title <code> <name>`: renames a pit for everyone.
+    public static func setPitTitle(binary: String, code: String, name: String) async throws {
+        _ = try await run(binary: binary, arguments: ["pit", "title", code, name])
+    }
+
     /// `brrrn config set-hub <url>`.
     public static func setHub(binary: String, url: String) async throws {
         _ = try await run(binary: binary, arguments: ["config", "set-hub", url])
@@ -90,10 +95,13 @@ public enum LocalEngine {
     public static func joinPit(
         binary: String,
         code: String,
-        handle: String,
+        handle: String? = nil,
         displayName: String? = nil
     ) async throws {
-        var arguments = ["pit", "join", code, "--as", handle]
+        var arguments = ["pit", "join", code]
+        if let handle, !handle.isEmpty {
+            arguments.append(contentsOf: ["--as", handle])
+        }
         if let displayName, !displayName.isEmpty {
             arguments.append(contentsOf: ["--display", displayName])
         }

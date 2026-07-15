@@ -103,9 +103,10 @@ enum PitAction {
     /// Join a pit using its invite code
     Join {
         code: String,
+        /// Pick your own ID (default: auto-generated, collision-proof)
         #[arg(long = "as")]
-        handle: String,
-        /// Display name shown on boards (handle stays your permanent ID)
+        handle: Option<String>,
+        /// Display name shown on boards (your ID never changes)
         #[arg(long)]
         display: Option<String>,
     },
@@ -117,6 +118,8 @@ enum PitAction {
     },
     /// Change your display name on every joined pit (handle never changes)
     Rename { display: String },
+    /// Rename a pit itself, for everyone in it (any member can)
+    Title { code: String, name: String },
 }
 
 #[derive(ClapArgs)]
@@ -303,9 +306,10 @@ fn run_pit(cli: &Cli, args: &PitArgs) -> Result<(), String> {
             code,
             handle,
             display,
-        }) => pit_join(cli, code, handle, display.as_deref()),
+        }) => pit_join(cli, code, handle.as_deref(), display.as_deref()),
         Some(PitAction::Show { handle, pit }) => pit_show(cli, handle, pit.as_deref()),
         Some(PitAction::Rename { display }) => pit_rename(cli, display),
+        Some(PitAction::Title { code, name }) => pit_title(cli, code, name),
         None => pit_board(cli),
     }
 }
@@ -329,13 +333,26 @@ fn pit_new(cli: &Cli, name: Option<&str>, token: Option<&str>) -> Result<(), Str
     Ok(())
 }
 
-fn pit_join(cli: &Cli, code: &str, handle: &str, display: Option<&str>) -> Result<(), String> {
+fn pit_join(
+    cli: &Cli,
+    code: &str,
+    handle: Option<&str>,
+    display: Option<&str>,
+) -> Result<(), String> {
     let path = config_path(cli);
-    let normalized = handle.to_lowercase();
+    // The ID is an implementation detail: auto-generated and collision-proof
+    // by default (48 random bits), fixed for the client's lifetime because
+    // day records key on it. People read display names, not IDs.
+    let generated_handle = format!("u{}", social::random_hex(6)?);
     let generated_secret = social::random_hex(24)?;
     let generated_machine = social::random_hex(12)?;
     let joined = Config::update(&path, |config| {
         let hub = config.hub()?.to_string();
+        let normalized = match handle {
+            Some(chosen) => chosen.to_lowercase(),
+            None if !config.handle.is_empty() => config.handle.clone(),
+            None => generated_handle.clone(),
+        };
         if !config.handle.is_empty() && config.handle != normalized {
             return Err(format!(
                 "this client already uses handle '{}'; one handle per client",
@@ -369,6 +386,9 @@ fn pit_join(cli: &Cli, code: &str, handle: &str, display: Option<&str>) -> Resul
         Ok(())
     })?;
     println!("joined pit {code} as {}", joined.handle);
+    if display.is_none() {
+        println!("set a friendly board name any time: brrrn pit rename \"Your Name\"");
+    }
     println!("run `brrrn submit` to backfill your history");
     Ok(())
 }
@@ -405,6 +425,27 @@ fn pit_rename(cli: &Cli, display: &str) -> Result<(), String> {
         "display name is now \"{display}\" (handle stays {})",
         config.handle
     );
+    Ok(())
+}
+
+fn pit_title(cli: &Cli, code: &str, name: &str) -> Result<(), String> {
+    let (config, _) = load_config(cli)?;
+    let hub = config.hub()?.to_string();
+    if config.handle.is_empty() || config.secret.is_none() {
+        return Err("join the pit first".to_string());
+    }
+    let response: OkResponse = social::post(
+        &format!("{hub}/pit/{code}/rename"),
+        &serde_json::json!({
+            "handle": config.handle.as_str(),
+            "secret": config.secret.as_deref().unwrap(),
+            "name": name,
+        }),
+    )?;
+    if !response.ok {
+        return Err("hub rejected the rename".to_string());
+    }
+    println!("pit {code} is now \"{name}\"");
     Ok(())
 }
 

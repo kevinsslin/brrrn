@@ -4,6 +4,26 @@ All notable changes to brrrn are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.1] - 2026-07-16
+
+### Added
+
+- Pits can be renamed by any member, from the pencil next to the pit
+  name in the app or `brrrn pit title <code> <name>` (pits deliberately
+  have no admin tier; the trust model is your friends)
+- Today's top three wear medals on the board; the weekly top burner
+  keeps the crown
+
+### Changed
+
+- Handles are now auto-generated, collision-proof IDs (48 random bits);
+  people set a display name instead. `pit join` no longer requires
+  `--as` (it remains available for picking your own ID), and the app's
+  setup page asks first-time joiners for their name only. This removes
+  the one unhandled conflict: joining a pit where someone else had
+  already claimed your handle.
+- Joining without a display name prints a hint about `brrrn pit rename`.
+
 ## [0.1.0] - 2026-07-16
 
 First public release. 🔥
@@ -62,4 +82,5 @@ First public release. 🔥
   until public tier pricing exists.
 - Models without a public LiteLLM price show `n/a` cost.
 
+[0.1.1]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.1
 [0.1.0]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.0

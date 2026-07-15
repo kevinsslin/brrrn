@@ -18,7 +18,6 @@ struct PitSetupView: View {
     }
 
     @State private var mode: Mode = .join
-    @State private var handle = ""
     @State private var displayName = ""
     @State private var pitName = ""
     @State private var code = ""
@@ -27,17 +26,19 @@ struct PitSetupView: View {
     @State private var createdCode: String?
     @State private var copied = false
 
-    private var lockedHandle: String? {
+    private var existingHandle: String? {
         let existing = model.config?.handle ?? ""
         return existing.isEmpty ? nil : existing
     }
 
-    private var effectiveHandle: String {
-        (lockedHandle ?? handle).trimmingCharacters(in: .whitespaces).lowercased()
-    }
-
     private var canSubmit: Bool {
-        guard !isWorking, !effectiveHandle.isEmpty else { return false }
+        guard !isWorking else { return false }
+        // First-time joiners need a display name: their ID is auto-generated
+        // machine noise, and a board of u3f9a2c rows helps nobody.
+        if existingHandle == nil
+            && displayName.trimmingCharacters(in: .whitespaces).isEmpty {
+            return false
+        }
         return mode == .create || !code.trimmingCharacters(in: .whitespaces).isEmpty
     }
 
@@ -117,28 +118,18 @@ struct PitSetupView: View {
                 }
             }
 
-            if let lockedHandle {
-                VStack(alignment: .leading, spacing: 4) {
-                    fieldLabel("HANDLE")
-                    Text(lockedHandle)
-                        .font(.callout.weight(.medium))
-                        .help("This machine already burns as \(lockedHandle); one handle per client.")
-                }
-            } else {
-                labeledField(
-                    label: "YOUR HANDLE (PERMANENT)",
-                    placeholder: "mitsuha",
-                    text: $handle,
-                    sample: "mitsuha"
-                )
-            }
-
             labeledField(
-                label: "DISPLAY NAME (OPTIONAL, EDITABLE)",
+                label: existingHandle == nil ? "YOUR NAME" : "YOUR NAME (OPTIONAL)",
                 placeholder: "Mitsuha",
                 text: $displayName,
                 sample: "Mitsuha"
             )
+            if let existingHandle {
+                Text("Joining as @\(existingHandle); leave the name empty to keep your current one.")
+                    .font(.caption2)
+                    .foregroundStyle(.tertiary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             if let errorText {
                 Label(errorText, systemImage: "exclamationmark.triangle.fill")
@@ -260,7 +251,6 @@ struct PitSetupView: View {
                 let display = displayName.trimmingCharacters(in: .whitespaces)
                 createdCode = try await model.createPit(
                     name: trimmedName.isEmpty ? nil : trimmedName,
-                    handle: effectiveHandle,
                     displayName: display.isEmpty ? nil : display
                 )
             case .join:
@@ -268,7 +258,6 @@ struct PitSetupView: View {
                 let invite = PitInvite.parse(code)
                 try await model.joinPit(
                     code: invite.code,
-                    handle: effectiveHandle,
                     displayName: display.isEmpty ? nil : display,
                     inviteHubURL: invite.hubURL
                 )

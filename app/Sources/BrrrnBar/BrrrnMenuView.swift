@@ -570,6 +570,78 @@ private struct FriendsEmptyState: View {
     }
 }
 
+private struct PitTitleButton: View {
+    let board: PitBoard
+    @ObservedObject var model: AppModel
+    @State private var isOpen = false
+    @State private var name = ""
+    @State private var isWorking = false
+    @State private var errorText: String?
+
+    var body: some View {
+        Button {
+            name = board.name ?? ""
+            isOpen.toggle()
+        } label: {
+            Image(systemName: "pencil")
+                .font(.caption2)
+                .foregroundStyle(.tertiary)
+        }
+        .buttonStyle(.plain)
+        .help("Rename this pit for everyone")
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("PIT NAME")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.1)
+                TextField("night shift", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                    .onSubmit { Task { await save() } }
+                if let errorText {
+                    Text(errorText)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Text("Everyone in the pit sees the new name.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if isWorking {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Save")
+                        }
+                    }
+                    .disabled(isWorking || name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(14)
+            .frame(width: 260)
+        }
+    }
+
+    private func save() async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        isWorking = true
+        errorText = nil
+        defer { isWorking = false }
+        do {
+            try await model.renamePit(code: board.code, to: trimmed)
+            isOpen = false
+        } catch {
+            errorText = error.localizedDescription
+        }
+    }
+}
+
 private struct RenameButton: View {
     @ObservedObject var model: AppModel
     @State private var isOpen = false
@@ -652,6 +724,8 @@ private struct PitBoardView: View {
             HStack {
                 Text((board.name?.isEmpty == false ? board.name : nil) ?? board.code)
                     .font(.headline)
+                    .lineLimit(1)
+                PitTitleButton(board: board, model: model)
                 Spacer()
                 Button {
                     showInvite.toggle()
@@ -721,10 +795,17 @@ private struct MemberRow: View {
     var body: some View {
         Button(action: action) {
             HStack(spacing: 9) {
-                Text("\(rank)")
-                    .font(.caption.monospacedDigit())
-                    .foregroundStyle(.secondary)
-                    .frame(width: 14, alignment: .trailing)
+                Group {
+                    if rank <= 3 && member.todayUSD > 0 {
+                        Text(["🥇", "🥈", "🥉"][rank - 1])
+                            .font(.system(size: 12))
+                    } else {
+                        Text("\(rank)")
+                            .font(.caption.monospacedDigit())
+                            .foregroundStyle(.secondary)
+                    }
+                }
+                .frame(width: 16, alignment: .trailing)
                 Text(MemberAvatar.emoji(for: member.handle))
                     .font(.system(size: 13))
                     .frame(width: 22, height: 22)

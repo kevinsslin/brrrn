@@ -2140,6 +2140,33 @@ test('board sorts members by today_usd desc', async () => {
   assert.deepEqual(board.data.members.map((m) => m.handle), ['high', 'mid', 'low']);
 });
 
+test('any member can retitle a pit; outsiders and impostors cannot', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'old name');
+  assert.equal((await join(env, code, 'alice', 'sa')).status, 200);
+  assert.equal((await join(env, code, 'bob', 'sb')).status, 200);
+
+  const renamed = await call(env, 'POST', `/pit/${code}/rename`, {
+    handle: 'bob', secret: 'sb', name: '  night shift  ',
+  });
+  assert.equal(renamed.status, 200);
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.name, 'night shift');
+
+  assert.equal((await call(env, 'POST', `/pit/${code}/rename`, {
+    handle: 'alice', secret: 'wrong', name: 'hijack',
+  })).status, 401);
+  assert.equal((await call(env, 'POST', `/pit/${code}/rename`, {
+    handle: 'ghost', secret: 'x', name: 'hijack',
+  })).status, 404);
+  assert.equal((await call(env, 'POST', `/pit/${code}/rename`, {
+    handle: 'alice', secret: 'sa', name: '',
+  })).status, 400);
+  assert.equal((await call(env, 'POST', `/pit/${code}/rename`, {
+    handle: 'alice', secret: 'sa', name: 'x'.repeat(81),
+  })).status, 400);
+});
+
 test('display names are cosmetic, editable, and never identity', async () => {
   const env = makeEnv();
   const code = await createPit(env, 'names');

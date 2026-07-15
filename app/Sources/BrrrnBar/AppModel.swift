@@ -177,7 +177,7 @@ final class AppModel: ObservableObject {
 
     /// Create a pit, join it as `handle`, backfill, and refresh. Returns the
     /// new code so the UI can hand it to friends.
-    func createPit(name: String?, handle: String, displayName: String? = nil) async throws -> String {
+    func createPit(name: String?, handle: String? = nil, displayName: String? = nil) async throws -> String {
         guard let binary = BinaryLocator().locate() else {
             throw EngineError.binaryNotFound
         }
@@ -195,7 +195,7 @@ final class AppModel: ObservableObject {
     /// invite carries a hub URL, adopt it if none is configured yet; a
     /// conflicting hub is an error rather than a silent switch, because one
     /// client tracks one hub.
-    func joinPit(code: String, handle: String, displayName: String? = nil, inviteHubURL: String? = nil) async throws {
+    func joinPit(code: String, handle: String? = nil, displayName: String? = nil, inviteHubURL: String? = nil) async throws {
         guard let binary = BinaryLocator().locate() else {
             throw EngineError.binaryNotFound
         }
@@ -242,6 +242,19 @@ final class AppModel: ObservableObject {
                     boards[boardIndex].members[memberIndex].displayName = name
                 }
             }
+        }
+        Task { await refresh(forcePit: true) }
+    }
+
+    /// Rename a pit for everyone; local boards patch instantly and the
+    /// full refresh confirms in the background.
+    func renamePit(code: String, to name: String) async throws {
+        guard let binary = BinaryLocator().locate() else {
+            throw EngineError.binaryNotFound
+        }
+        try await LocalEngine.setPitTitle(binary: binary, code: code, name: name)
+        for index in boards.indices where boards[index].code == code {
+            boards[index].name = name
         }
         Task { await refresh(forcePit: true) }
     }

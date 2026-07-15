@@ -115,10 +115,12 @@ brrrn config set-hub https://brrrn-hub.<account>.workers.dev
 brrrn pit new --name "night shift"        # prints the join code
 ```
 
-Each person joins with their own handle and backfills their history:
+Each person joins with the name their friends should see, and backfills
+their history (the permanent ID underneath is auto-generated, so names
+can never collide):
 
 ```sh
-brrrn pit join ember-fox-x7kq --as kevin
+brrrn pit join ember-fox-x7kq --display "Kevin"
 brrrn submit
 ```
 
