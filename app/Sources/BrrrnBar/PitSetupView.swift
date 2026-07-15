@@ -66,56 +66,120 @@ struct PitSetupView: View {
             .padding(18)
             .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)
         }
+        // Fill the whole menu window; without this the stack renders at its
+        // natural height and floats vertically centered.
+        .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .top)
     }
 
     private var form: some View {
         Group {
+            HStack(spacing: 10) {
+                Image(systemName: "flame.fill")
+                    .font(.title2)
+                    .foregroundStyle(.orange)
+                VStack(alignment: .leading, spacing: 2) {
+                    Text("Burn with your crew")
+                        .font(.headline)
+                    Text("One of you starts a pit; everyone joins with its code.")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                }
+            }
+            .padding(.bottom, 2)
 
             TabStrip(
                 selection: $mode,
                 options: Mode.allCases.map { ($0, $0.rawValue) }
             )
+            .padding(.bottom, 4)
 
             if mode == .create {
-                field("Pit name (optional)", text: $pitName, sample: "night shift")
+                labeledField(
+                    label: "PIT NAME (OPTIONAL)",
+                    placeholder: "night shift",
+                    text: $pitName,
+                    sample: "night shift"
+                )
             } else {
-                field("Join code, like ember-fox-7k2m", text: $code, sample: "ember-fox-7k2m", monospaced: true)
+                labeledField(
+                    label: "JOIN CODE",
+                    placeholder: "ember-fox-7k2m",
+                    text: $code,
+                    sample: "ember-fox-7k2m",
+                    monospaced: true
+                )
             }
 
             if let lockedHandle {
-                LabeledContent("Handle", value: lockedHandle)
-                    .font(.callout)
-                    .help("This machine already burns as \(lockedHandle); one handle per client.")
+                VStack(alignment: .leading, spacing: 4) {
+                    fieldLabel("HANDLE")
+                    Text(lockedHandle)
+                        .font(.callout.weight(.medium))
+                        .help("This machine already burns as \(lockedHandle); one handle per client.")
+                }
             } else {
-                field("Your handle", text: $handle, sample: "mitsuha")
+                labeledField(
+                    label: "YOUR HANDLE",
+                    placeholder: "mitsuha",
+                    text: $handle,
+                    sample: "mitsuha"
+                )
             }
 
             if let errorText {
-                Text(errorText)
+                Label(errorText, systemImage: "exclamationmark.triangle.fill")
                     .font(.caption)
                     .foregroundStyle(.red)
                     .fixedSize(horizontal: false, vertical: true)
             }
 
-            HStack {
-                Spacer()
-                Button {
-                    Task { await submit() }
-                } label: {
+            Button {
+                Task { await submit() }
+            } label: {
+                Group {
                     if isWorking {
                         ProgressView().controlSize(.small)
                     } else {
-                        Text(mode == .create ? "Create & join" : "Join")
+                        Text(mode == .create ? "Create & join" : "Join the pit")
+                            .font(.callout.weight(.semibold))
                     }
                 }
-                .keyboardShortcut(.defaultAction)
-                .disabled(!canSubmit)
+                .frame(maxWidth: .infinity)
+                .padding(.vertical, 4)
             }
+            .buttonStyle(.borderedProminent)
+            .tint(.orange)
+            .keyboardShortcut(.defaultAction)
+            .disabled(!canSubmit)
+            .padding(.top, 4)
 
-            Text("Joining uploads daily totals only: costs and token counts per UTC day, never prompts or code.")
-                .font(.caption2)
-                .foregroundStyle(.tertiary)
-                .fixedSize(horizontal: false, vertical: true)
+            Label(
+                "Uploads daily totals only: costs and token counts per UTC day. Never prompts or code.",
+                systemImage: "lock.fill"
+            )
+            .font(.caption2)
+            .foregroundStyle(.tertiary)
+            .fixedSize(horizontal: false, vertical: true)
+        }
+    }
+
+    private func fieldLabel(_ text: String) -> some View {
+        Text(text)
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.secondary)
+            .tracking(1.1)
+    }
+
+    private func labeledField(
+        label: String,
+        placeholder: String,
+        text: Binding<String>,
+        sample: String,
+        monospaced: Bool = false
+    ) -> some View {
+        VStack(alignment: .leading, spacing: 4) {
+            fieldLabel(label)
+            field(placeholder, text: text, sample: sample, monospaced: monospaced)
         }
     }
 
