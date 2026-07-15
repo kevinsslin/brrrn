@@ -2140,6 +2140,21 @@ test('board sorts members by today_usd desc', async () => {
   assert.deepEqual(board.data.members.map((m) => m.handle), ['high', 'mid', 'low']);
 });
 
+test('PIT_CREATE_TOKEN gates creation but never joining', async () => {
+  const env = makeEnv();
+  env.PIT_CREATE_TOKEN = 'crew-only';
+
+  const missing = await call(env, 'POST', '/pit', { name: 'open' });
+  assert.equal(missing.status, 403);
+  const wrong = await call(env, 'POST', '/pit', { name: 'open', create_token: 'guess' });
+  assert.equal(wrong.status, 403);
+
+  const ok = await call(env, 'POST', '/pit', { name: 'open', create_token: 'crew-only' });
+  assert.equal(ok.status, 200);
+  const joined = await join(env, ok.data.code, 'alice', 's3cret');
+  assert.equal(joined.status, 200);
+});
+
 test('pit can be created with no name and no body', async () => {
   const env = makeEnv();
   const res = await call(env, 'POST', '/pit');

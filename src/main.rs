@@ -96,6 +96,9 @@ enum PitAction {
     New {
         #[arg(long)]
         name: Option<String>,
+        /// Create token, for hubs that gate pit creation (PIT_CREATE_TOKEN)
+        #[arg(long)]
+        token: Option<String>,
     },
     /// Join a pit using its invite code
     Join {
@@ -290,21 +293,26 @@ fn run_config(cli: &Cli, action: &ConfigAction) -> Result<(), String> {
 
 fn run_pit(cli: &Cli, args: &PitArgs) -> Result<(), String> {
     match &args.action {
-        Some(PitAction::New { name }) => pit_new(cli, name.as_deref()),
+        Some(PitAction::New { name, token }) => pit_new(cli, name.as_deref(), token.as_deref()),
         Some(PitAction::Join { code, handle }) => pit_join(cli, code, handle),
         Some(PitAction::Show { handle, pit }) => pit_show(cli, handle, pit.as_deref()),
         None => pit_board(cli),
     }
 }
 
-fn pit_new(cli: &Cli, name: Option<&str>) -> Result<(), String> {
+fn pit_new(cli: &Cli, name: Option<&str>, token: Option<&str>) -> Result<(), String> {
     let (config, _) = load_config(cli)?;
     let url = format!("{}/pit", config.hub()?);
-    let body = name.map_or_else(
-        || serde_json::json!({}),
-        |value| serde_json::json!({ "name": value }),
-    );
-    let response: PitCreateResponse = social::post(&url, &body)?;
+    let mut body = serde_json::Map::new();
+    if let Some(value) = name {
+        body.insert("name".into(), value.into());
+    }
+    // Gated hubs: --token wins, else a `create_token` saved in the config.
+    let config_token = config.extra.get("create_token").and_then(|v| v.as_str());
+    if let Some(value) = token.or(config_token) {
+        body.insert("create_token".into(), value.into());
+    }
+    let response: PitCreateResponse = social::post(&url, &serde_json::Value::Object(body))?;
     println!("created pit: {}", response.code);
     println!("share this code, then join it yourself:");
     println!("  brrrn pit join {} --as <handle>", response.code);

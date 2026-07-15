@@ -253,6 +253,14 @@ async function pitExists(kv, code) {
 async function createPit(request, env, now) {
   const parsed = await readObject(request, true);
   if (parsed.error) return error(parsed.error, parsed.status);
+  // Optional gate for shared hubs: when the operator sets PIT_CREATE_TOKEN,
+  // only people they gave the token to can open new pits. Joining and
+  // submitting stay token-free (the pit code is that key).
+  if (env.PIT_CREATE_TOKEN) {
+    if (parsed.value.create_token !== env.PIT_CREATE_TOKEN) {
+      return error('a create token is required on this hub', 403);
+    }
+  }
   const name = parsed.value.name;
   if (name !== undefined && (typeof name !== 'string' || name.length > 80)) {
     return error('name must be a string up to 80 characters');

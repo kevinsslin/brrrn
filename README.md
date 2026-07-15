@@ -95,6 +95,15 @@ npx wrangler kv namespace create BRRRN_KV
 npx wrangler deploy
 ```
 
+Running one hub for several crews? Optionally gate pit creation so only
+people you approve can open new pits (joining never needs the token; the
+pit code is that key):
+
+```sh
+npx wrangler secret put PIT_CREATE_TOKEN     # pick a passphrase
+brrrn pit new --name "night shift" --token <passphrase>
+```
+
 ### 2. Create a pit and invite your crew
 
 ```sh
