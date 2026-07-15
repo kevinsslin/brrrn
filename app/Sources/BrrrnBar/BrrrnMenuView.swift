@@ -482,6 +482,11 @@ private struct TokenDetail: View {
             if let subtitle { Text(subtitle).font(.caption).foregroundStyle(.secondary) }
             LabeledContent("Cost", value: cost.map(Format.money) ?? "n/a")
                 .font(.callout.weight(.semibold))
+            if fastCost > 0 || fastTokens > 0 {
+                Text("standard \(Format.money(max(0, (cost ?? 0) - fastCost))) + fast \(Format.money(fastCost))")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
+            }
             Divider()
             LabeledContent("Input", value: Format.tokens(input))
             if let cacheRead, cacheRead > 0 {
@@ -499,14 +504,6 @@ private struct TokenDetail: View {
             }
             if let total {
                 LabeledContent("Total", value: Format.tokens(total))
-            }
-            if fastCost > 0 || fastTokens > 0 {
-                Divider()
-                LabeledContent("Fast mode", value: Format.money(fastCost))
-                LabeledContent("Standard", value: Format.money(max(0, (cost ?? 0) - fastCost)))
-                Text("Fast mode: \(Format.tokens(fastTokens)) tokens, shown at standard rates.")
-                    .font(.caption2)
-                    .foregroundStyle(.secondary)
             }
         }
         .monospacedDigit()
