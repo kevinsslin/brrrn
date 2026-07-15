@@ -455,7 +455,9 @@ private struct ModelRow: View {
                 reasoning: model.reasoningTokens,
                 total: model.totalTokens,
                 cost: model.costUSD,
-                subtitle: presentation.provider.displayName
+                subtitle: presentation.provider.displayName,
+                fastCost: model.fastCostUSD,
+                fastTokens: model.fastTotalTokens
             )
         }
     }
@@ -471,6 +473,8 @@ private struct TokenDetail: View {
     var total: Int? = nil
     let cost: Double?
     let subtitle: String?
+    var fastCost: Double = 0
+    var fastTokens: Int = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: 8) {
@@ -495,6 +499,14 @@ private struct TokenDetail: View {
             }
             if let total {
                 LabeledContent("Total", value: Format.tokens(total))
+            }
+            if fastCost > 0 || fastTokens > 0 {
+                Divider()
+                LabeledContent("Fast mode", value: Format.money(fastCost))
+                LabeledContent("Standard", value: Format.money(max(0, (cost ?? 0) - fastCost)))
+                Text("Fast mode: \(Format.tokens(fastTokens)) tokens, shown at standard rates.")
+                    .font(.caption2)
+                    .foregroundStyle(.secondary)
             }
         }
         .monospacedDigit()

@@ -112,6 +112,10 @@ public struct BurnReport: Codable, Sendable, Equatable {
         public var source: String
         public var model: String
         public var speed: String?
+        /// Fast-mode share folded into this row (Claude fast, Codex priority
+        /// tier). Computed client-side by ModelMerge; never decoded.
+        public var fastCostUSD: Double = 0
+        public var fastTotalTokens: Int = 0
         public var inputTokens: Int
         public var outputTokens: Int
         public var cacheReadTokens: Int?

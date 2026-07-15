@@ -54,7 +54,9 @@ final class AppModel: ObservableObject {
         case .week: weekReport
         case .month: monthReport
         }
-        return Array(ModelSort.byCostDescending(source?.byModel ?? []).prefix(8))
+        return Array(
+            ModelSort.byCostDescending(ModelMerge.foldFastMode(source?.byModel ?? [])).prefix(8)
+        )
     }
 
     /// Fixture injection for the screenshot generator; nil in normal runs.
