@@ -103,8 +103,8 @@ struct PitSetupView: View {
                 )
             } else {
                 labeledField(
-                    label: "JOIN CODE",
-                    placeholder: "ember-fox-7k2m",
+                    label: "INVITE OR CODE",
+                    placeholder: "ember-fox-7k2m or code@hub",
                     text: $code,
                     sample: "ember-fox-7k2m",
                     monospaced: true
@@ -259,10 +259,12 @@ struct PitSetupView: View {
                 )
             case .join:
                 let display = displayName.trimmingCharacters(in: .whitespaces)
+                let invite = PitInvite.parse(code)
                 try await model.joinPit(
-                    code: code.trimmingCharacters(in: .whitespaces).lowercased(),
+                    code: invite.code,
                     handle: effectiveHandle,
-                    displayName: display.isEmpty ? nil : display
+                    displayName: display.isEmpty ? nil : display,
+                    inviteHubURL: invite.hubURL
                 )
                 onClose()
             }

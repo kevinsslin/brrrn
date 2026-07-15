@@ -34,7 +34,7 @@ struct BrrrnMenuView: View {
 
     private var mainContent: some View {
         VStack(spacing: 0) {
-            TabStrip(selection: $rootTabRaw, options: [("me", "Me"), ("pits", "Friends")])
+            TabStrip(selection: $rootTabRaw, options: [("me", "Me"), ("pits", "Pits")])
                 .padding(.horizontal, 18)
                 .padding(.top, 12)
                 .padding(.bottom, 2)
@@ -513,6 +513,18 @@ private struct PitSections: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
             if let config = model.config, config.hasPits {
+                HStack {
+                    Text("YOUR PITS")
+                        .font(.caption.weight(.semibold))
+                        .foregroundStyle(.secondary)
+                        .tracking(1.2)
+                    Spacer()
+                    Button(action: openSetup) {
+                        Label("New", systemImage: "plus")
+                            .font(.caption.weight(.semibold))
+                    }
+                    .controlSize(.small)
+                }
                 ForEach(model.boards, id: \.code) { board in
                     PitBoardView(board: board, model: model)
                 }
@@ -583,15 +595,19 @@ private struct PitBoardView: View {
                                 .font(.title3.weight(.semibold).monospaced())
                                 .textSelection(.enabled)
                             Button {
+                                let invite = PitInvite.compose(
+                                    code: board.code,
+                                    hubURL: model.config?.hubURL
+                                )
                                 NSPasteboard.general.clearContents()
-                                NSPasteboard.general.setString(board.code, forType: .string)
+                                NSPasteboard.general.setString(invite, forType: .string)
                                 copiedInvite = true
                             } label: {
-                                Label(copiedInvite ? "Copied" : "Copy",
+                                Label(copiedInvite ? "Copied" : "Copy invite",
                                       systemImage: copiedInvite ? "checkmark" : "doc.on.doc")
                             }
                         }
-                        Text("Anyone with this code can join and see the board.")
+                        Text("The invite carries the code and your hub; pasting it in Join is all a friend needs.")
                             .font(.caption2)
                             .foregroundStyle(.tertiary)
                     }

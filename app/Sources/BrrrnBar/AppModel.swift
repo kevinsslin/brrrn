@@ -2,6 +2,17 @@ import Foundation
 import SwiftUI
 import BrrrnCore
 
+enum PitJoinError: LocalizedError {
+    case hubMismatch(configured: String, invited: String)
+
+    var errorDescription: String? {
+        switch self {
+        case .hubMismatch(let configured, let invited):
+            "This invite is for \(invited), but this client is set up for \(configured). One client tracks one hub."
+        }
+    }
+}
+
 @MainActor
 final class AppModel: ObservableObject {
     struct Selection: Identifiable {
@@ -180,12 +191,24 @@ final class AppModel: ObservableObject {
         return code
     }
 
-    /// Join an existing pit as `handle`, backfill, and refresh.
-    func joinPit(code: String, handle: String, displayName: String? = nil) async throws {
+    /// Join an existing pit as `handle`, backfill, and refresh. When the
+    /// invite carries a hub URL, adopt it if none is configured yet; a
+    /// conflicting hub is an error rather than a silent switch, because one
+    /// client tracks one hub.
+    func joinPit(code: String, handle: String, displayName: String? = nil, inviteHubURL: String? = nil) async throws {
         guard let binary = BinaryLocator().locate() else {
             throw EngineError.binaryNotFound
         }
+        let current = config?.hubURL.trimmingCharacters(in: CharacterSet(charactersIn: "/")) ?? ""
         try await configStore.serialize {
+            if let inviteHubURL {
+                let invited = inviteHubURL.trimmingCharacters(in: CharacterSet(charactersIn: "/"))
+                if current.isEmpty {
+                    try await LocalEngine.setHub(binary: binary, url: invited)
+                } else if current != invited {
+                    throw PitJoinError.hubMismatch(configured: current, invited: invited)
+                }
+            }
             try await LocalEngine.joinPit(
                 binary: binary, code: code, handle: handle, displayName: displayName
             )

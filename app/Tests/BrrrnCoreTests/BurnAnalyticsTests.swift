@@ -187,6 +187,24 @@ final class BurnAnalyticsTests: XCTestCase {
         XCTAssertTrue(records.longestStreakIsCurrent)
     }
 
+    func testPitInviteParsingRoundTrips() {
+        XCTAssertEqual(PitInvite.parse("ember-fox-7k2m").code, "ember-fox-7k2m")
+        XCTAssertNil(PitInvite.parse("ember-fox-7k2m").hubURL)
+
+        let full = PitInvite.parse(" Ember-Fox-7K2M@https://brrrn.example.workers.dev/ ")
+        XCTAssertEqual(full.code, "ember-fox-7k2m")
+        XCTAssertEqual(full.hubURL, "https://brrrn.example.workers.dev/")
+
+        let bare = PitInvite.parse("ember-fox-7k2m@brrrn.example.workers.dev")
+        XCTAssertEqual(bare.hubURL, "https://brrrn.example.workers.dev")
+
+        XCTAssertEqual(
+            PitInvite.compose(code: "ember-fox-7k2m", hubURL: "https://h.example"),
+            "ember-fox-7k2m@https://h.example"
+        )
+        XCTAssertEqual(PitInvite.compose(code: "ember-fox-7k2m", hubURL: nil), "ember-fox-7k2m")
+    }
+
     private func utcDate(_ year: Int, _ month: Int, _ day: Int) -> Date {
         var components = DateComponents()
         components.year = year

@@ -57,6 +57,11 @@ public enum LocalEngine {
         _ = try await run(binary: binary, arguments: ["submit"])
     }
 
+    /// `brrrn config set-hub <url>`.
+    public static func setHub(binary: String, url: String) async throws {
+        _ = try await run(binary: binary, arguments: ["config", "set-hub", url])
+    }
+
     /// `brrrn pit new [--name <name>]`, returning the freshly minted code.
     public static func createPit(binary: String, name: String?) async throws -> String {
         var arguments = ["pit", "new"]
