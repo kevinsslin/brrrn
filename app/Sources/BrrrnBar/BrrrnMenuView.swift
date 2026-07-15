@@ -323,6 +323,16 @@ private struct SourceValue: View {
 private struct ModelSection: View {
     let models: [BurnReport.ModelUsage]
 
+    @AppStorage("modelsExpanded") private var isExpanded = false
+
+    private static let collapsedCount = 3
+
+    private var hidden: Int { max(0, models.count - Self.collapsedCount) }
+
+    private var visibleModels: ArraySlice<BurnReport.ModelUsage> {
+        isExpanded ? models[...] : models.prefix(Self.collapsedCount)
+    }
+
     var body: some View {
         VStack(alignment: .leading, spacing: 10) {
             Text("THIS WEEK BY MODEL")
@@ -334,8 +344,23 @@ private struct ModelSection: View {
                     .font(.callout)
                     .foregroundStyle(.secondary)
             } else {
-                ForEach(models) { model in
+                ForEach(visibleModels) { model in
                     ModelRow(model: model)
+                }
+                if hidden > 0 {
+                    Button {
+                        withAnimation(.easeOut(duration: 0.15)) { isExpanded.toggle() }
+                    } label: {
+                        HStack(spacing: 4) {
+                            Image(systemName: isExpanded ? "chevron.up" : "chevron.down")
+                                .font(.caption2)
+                            Text(isExpanded ? "Show less" : "\(hidden) more model\(hidden == 1 ? "" : "s")")
+                                .font(.caption)
+                        }
+                        .foregroundStyle(.secondary)
+                        .contentShape(Rectangle())
+                    }
+                    .buttonStyle(.plain)
                 }
             }
         }
@@ -365,17 +390,11 @@ private struct ModelRow: View {
         Button { isPinned.toggle() } label: {
             HStack(spacing: 9) {
                 ProviderMark(provider: presentation.provider, size: 13)
-                VStack(alignment: .leading, spacing: 3) {
-                    Text(model.model)
-                        .font(.callout)
-                        .lineLimit(1)
-                    Text(presentation.variantLabel)
-                        .font(.caption2.weight(.medium))
-                        .foregroundStyle(.secondary)
-                        .padding(.horizontal, 6)
-                        .padding(.vertical, 2)
-                        .background(.quaternary, in: Capsule())
-                }
+                (Text(model.model)
+                    + Text(presentation.variantSuffix.map { " (\($0))" } ?? "")
+                        .foregroundStyle(.secondary))
+                    .font(.callout)
+                    .lineLimit(1)
                 Spacer(minLength: 8)
                 Text(model.costUSD.map(Format.money) ?? "n/a")
                     .font(.callout.weight(.semibold))
@@ -386,11 +405,11 @@ private struct ModelRow: View {
         .buttonStyle(.plain)
         .delayedHover($isHovered)
         .onExitCommand { isPinned = false }
-        .accessibilityLabel("\(presentation.provider.accessibilityName), \(model.model), \(presentation.variantLabel), \(model.costUSD.map(Format.money) ?? "cost unavailable")")
+        .accessibilityLabel("\(presentation.provider.accessibilityName), \(model.displayTitle), \(model.costUSD.map(Format.money) ?? "cost unavailable")")
         .accessibilityHint("Shows token details")
         .popover(isPresented: detailPresented, arrowEdge: .trailing) {
             TokenDetail(
-                title: model.model,
+                title: model.displayTitle,
                 input: model.inputTokens,
                 cacheRead: model.cacheReadTokens,
                 cacheWrite: model.cacheWriteTokens,
@@ -398,7 +417,7 @@ private struct ModelRow: View {
                 reasoning: model.reasoningTokens,
                 total: model.totalTokens,
                 cost: model.costUSD,
-                subtitle: presentation.variantLabel
+                subtitle: presentation.provider.displayName
             )
         }
     }
@@ -460,20 +479,67 @@ private struct PitSections: View {
                         .foregroundStyle(.secondary)
                 }
             } else {
-                VStack(alignment: .leading, spacing: 6) {
-                    Text("FRIENDS")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.secondary)
-                        .tracking(1.2)
-                    Text("No pit configured")
-                        .font(.callout.weight(.medium))
-                    Text("Run `brrrn pit join <code> --as <you>`")
-                        .font(.caption.monospaced())
-                        .foregroundStyle(.secondary)
-                        .textSelection(.enabled)
-                }
+                FriendsEmptyState()
             }
         }
+    }
+}
+
+private struct FriendsEmptyState: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 8) {
+            Text("FRIENDS")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.secondary)
+                .tracking(1.2)
+            Text("Your crew isn't here yet")
+                .font(.callout.weight(.medium))
+            Text("One of you starts the fire, everyone else joins with the code it prints.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            CommandRow(label: "Start a pit", command: "brrrn pit new")
+            CommandRow(label: "Join one", command: "brrrn pit join <code> --as <you>")
+        }
+    }
+}
+
+private struct CommandRow: View {
+    let label: String
+    let command: String
+
+    @State private var copied = false
+
+    var body: some View {
+        HStack(spacing: 8) {
+            Text(label)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .frame(width: 66, alignment: .leading)
+            Text(command)
+                .font(.caption.monospaced())
+                .lineLimit(1)
+                .textSelection(.enabled)
+            Spacer(minLength: 4)
+            Button {
+                NSPasteboard.general.clearContents()
+                NSPasteboard.general.setString(command, forType: .string)
+                copied = true
+                Task { @MainActor in
+                    try? await Task.sleep(for: .seconds(1.5))
+                    copied = false
+                }
+            } label: {
+                Image(systemName: copied ? "checkmark" : "doc.on.doc")
+                    .font(.caption2)
+                    .foregroundStyle(copied ? .green : .secondary)
+            }
+            .buttonStyle(.plain)
+            .help("Copy command")
+        }
+        .padding(.horizontal, 8)
+        .padding(.vertical, 5)
+        .background(.quaternary.opacity(0.5), in: RoundedRectangle(cornerRadius: 6))
     }
 }
 
@@ -515,7 +581,11 @@ private struct MemberRow: View {
                 Text("\(rank)")
                     .font(.caption.monospacedDigit())
                     .foregroundStyle(.secondary)
-                    .frame(width: 18, alignment: .trailing)
+                    .frame(width: 14, alignment: .trailing)
+                Text(MemberAvatar.emoji(for: member.handle))
+                    .font(.system(size: 13))
+                    .frame(width: 22, height: 22)
+                    .background(.quaternary.opacity(0.6), in: Circle())
                 Text(member.handle)
                     .font(.callout.weight(.medium))
                 Spacer()
@@ -611,7 +681,11 @@ private struct MemberDetailView: View {
                 }
                 .buttonStyle(.plain)
                 Spacer()
-                Text(selection.member.handle).font(.headline)
+                HStack(spacing: 6) {
+                    Text(MemberAvatar.emoji(for: selection.member.handle))
+                        .font(.system(size: 15))
+                    Text(selection.member.handle).font(.headline)
+                }
                 Spacer()
                 Color.clear.frame(width: 45)
             }

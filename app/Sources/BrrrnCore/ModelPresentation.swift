@@ -24,11 +24,19 @@ public enum ModelProvider: String, Sendable, Equatable {
 
 public struct ModelPresentation: Sendable, Equatable {
     public var provider: ModelProvider
-    public var variantLabel: String
+    /// Short parenthetical variant ("x-high", "fast", "medium"). Nil for the
+    /// provider's default mode: a default carries no information, so it is
+    /// not displayed at all.
+    public var variantSuffix: String?
 
     public init(source: String, speed: String?) {
         provider = Self.provider(for: source)
-        variantLabel = Self.variant(for: provider, speed: speed)
+        variantSuffix = Self.suffix(for: speed)
+    }
+
+    /// "gpt-5.6-sol (x-high)", or just the model name when running default.
+    public func title(for model: String) -> String {
+        variantSuffix.map { "\(model) (\($0))" } ?? model
     }
 
     private static func provider(for source: String) -> ModelProvider {
@@ -39,37 +47,26 @@ public struct ModelPresentation: Sendable, Equatable {
         }
     }
 
-    private static func variant(for provider: ModelProvider, speed: String?) -> String {
+    private static func suffix(for speed: String?) -> String? {
         let normalized = speed?.trimmingCharacters(in: .whitespacesAndNewlines).lowercased() ?? ""
-        switch provider {
-        case .claude:
-            return switch normalized {
-            case "", "default", "standard": "Standard"
-            case "fast": "Fast"
-            default: readable(normalized)
-            }
-        case .codex:
-            let level = switch normalized {
-            case "", "default", "standard": "Default"
-            case "xhigh", "x-high": "X-High"
-            default: readable(normalized)
-            }
-            return "Reasoning: \(level)"
-        case .unknown:
-            return normalized.isEmpty ? "Default" : readable(normalized)
+        switch normalized {
+        case "", "default", "standard", "none":
+            return nil
+        case "xhigh", "x-high":
+            return "x-high"
+        default:
+            return normalized.replacingOccurrences(of: "_", with: "-")
         }
-    }
-
-    private static func readable(_ value: String) -> String {
-        value
-            .split(whereSeparator: { $0 == "_" || $0 == "-" })
-            .map { $0.prefix(1).uppercased() + $0.dropFirst() }
-            .joined(separator: " ")
     }
 }
 
 extension BurnReport.ModelUsage {
     public var presentation: ModelPresentation {
         ModelPresentation(source: source, speed: speed)
+    }
+
+    /// Row title with the variant folded in: "claude-fable-5 (fast)".
+    public var displayTitle: String {
+        presentation.title(for: model)
     }
 }
