@@ -216,6 +216,17 @@ final class AppModel: ObservableObject {
         await refresh(forcePit: true)
     }
 
+    /// Update the display name everywhere; boards refresh to show it.
+    func renameDisplay(to name: String) async throws {
+        guard let binary = BinaryLocator().locate() else {
+            throw EngineError.binaryNotFound
+        }
+        try await configStore.serialize {
+            try await LocalEngine.renameDisplay(binary: binary, to: name)
+        }
+        await refresh(forcePit: true)
+    }
+
     func openMember(pitCode: String, member: PitBoard.Member) async {
         guard let config else { return }
         isLoadingMember = true

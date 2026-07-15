@@ -57,6 +57,12 @@ public enum LocalEngine {
         _ = try await run(binary: binary, arguments: ["submit"])
     }
 
+    /// `brrrn pit rename <display>`: updates the display name on every
+    /// joined pit; the handle never changes.
+    public static func renameDisplay(binary: String, to name: String) async throws {
+        _ = try await run(binary: binary, arguments: ["pit", "rename", name])
+    }
+
     /// `brrrn config set-hub <url>`.
     public static func setHub(binary: String, url: String) async throws {
         _ = try await run(binary: binary, arguments: ["config", "set-hub", url])

@@ -519,6 +519,7 @@ private struct PitSections: View {
                         .foregroundStyle(.secondary)
                         .tracking(1.2)
                     Spacer()
+                    RenameButton(model: model)
                     Button(action: openSetup) {
                         Label("New", systemImage: "plus")
                             .font(.caption.weight(.semibold))
@@ -559,6 +560,77 @@ private struct FriendsEmptyState: View {
                     .frame(maxWidth: .infinity)
             }
             .controlSize(.large)
+        }
+    }
+}
+
+private struct RenameButton: View {
+    @ObservedObject var model: AppModel
+    @State private var isOpen = false
+    @State private var name = ""
+    @State private var isWorking = false
+    @State private var errorText: String?
+
+    var body: some View {
+        Button {
+            isOpen.toggle()
+        } label: {
+            Image(systemName: "pencil")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .buttonStyle(.plain)
+        .help("Change your display name (your handle never changes)")
+        .popover(isPresented: $isOpen, arrowEdge: .bottom) {
+            VStack(alignment: .leading, spacing: 10) {
+                Text("DISPLAY NAME")
+                    .font(.caption2.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .tracking(1.1)
+                TextField("Kevin the Flame", text: $name)
+                    .textFieldStyle(.roundedBorder)
+                    .frame(width: 200)
+                    .onSubmit { Task { await save() } }
+                if let errorText {
+                    Text(errorText)
+                        .font(.caption2)
+                        .foregroundStyle(.red)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+                HStack {
+                    Text("Shown on every board; @\(model.config?.handle ?? "you") stays.")
+                        .font(.caption2)
+                        .foregroundStyle(.tertiary)
+                    Spacer()
+                    Button {
+                        Task { await save() }
+                    } label: {
+                        if isWorking {
+                            ProgressView().controlSize(.small)
+                        } else {
+                            Text("Save")
+                        }
+                    }
+                    .disabled(isWorking || name.trimmingCharacters(in: .whitespaces).isEmpty)
+                }
+            }
+            .padding(14)
+            .frame(width: 250)
+        }
+    }
+
+    private func save() async {
+        let trimmed = name.trimmingCharacters(in: .whitespaces)
+        guard !trimmed.isEmpty else { return }
+        isWorking = true
+        errorText = nil
+        defer { isWorking = false }
+        do {
+            try await model.renameDisplay(to: trimmed)
+            isOpen = false
+            name = ""
+        } catch {
+            errorText = error.localizedDescription
         }
     }
 }

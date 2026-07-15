@@ -115,6 +115,10 @@ enum PitAction {
         #[arg(long)]
         pit: Option<String>,
     },
+    /// Change your display name on every joined pit (handle never changes)
+    Rename {
+        display: String,
+    },
 }
 
 #[derive(ClapArgs)]
@@ -301,6 +305,7 @@ fn run_pit(cli: &Cli, args: &PitArgs) -> Result<(), String> {
             pit_join(cli, code, handle, display.as_deref())
         }
         Some(PitAction::Show { handle, pit }) => pit_show(cli, handle, pit.as_deref()),
+        Some(PitAction::Rename { display }) => pit_rename(cli, display),
         None => pit_board(cli),
     }
 }
@@ -365,6 +370,38 @@ fn pit_join(cli: &Cli, code: &str, handle: &str, display: Option<&str>) -> Resul
     })?;
     println!("joined pit {code} as {}", joined.handle);
     println!("run `brrrn submit` to backfill your history");
+    Ok(())
+}
+
+/// Re-joining with the stored secret is the rename primitive: the hub treats
+/// a same-secret join as a display-name update, never a conflict.
+fn pit_rename(cli: &Cli, display: &str) -> Result<(), String> {
+    let (config, _) = load_config(cli)?;
+    let hub = config.hub()?.to_string();
+    if config.handle.is_empty() {
+        return Err("no handle configured; join a pit first".to_string());
+    }
+    let Some(secret) = config.secret.as_deref() else {
+        return Err("no secret configured; join a pit first".to_string());
+    };
+    if config.pits.is_empty() {
+        return Err("no pits configured; join a pit first".to_string());
+    }
+    for code in &config.pits {
+        let response: OkResponse = social::post(
+            &format!("{hub}/pit/{code}/join"),
+            &serde_json::json!({
+                "handle": config.handle.as_str(),
+                "secret": secret,
+                "display_name": display,
+            }),
+        )?;
+        if !response.ok {
+            return Err(format!("hub rejected the rename for pit {code}"));
+        }
+        println!("renamed on {code}");
+    }
+    println!("display name is now \"{display}\" (handle stays {})", config.handle);
     Ok(())
 }
 
