@@ -735,7 +735,7 @@ private struct MemberDetailView: View {
                     }
                 }
                 Spacer()
-                Color.clear.frame(width: 45)
+                Color.clear.frame(width: 45, height: 1)
             }
             .padding(14)
             Divider()

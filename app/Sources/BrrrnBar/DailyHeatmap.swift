@@ -62,6 +62,7 @@ struct DailyHeatmap: View {
         }
         .focusable()
         .focused($isFocused)
+        .focusEffectDisabled()
         .onKeyPress(.leftArrow) { moveSelection(.left) }
         .onKeyPress(.rightArrow) { moveSelection(.right) }
         .onKeyPress(.upArrow) { moveSelection(.up) }

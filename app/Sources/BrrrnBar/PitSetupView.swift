@@ -52,7 +52,7 @@ struct PitSetupView: View {
                 Spacer()
                 Text("FRIENDS").font(.headline)
                 Spacer()
-                Color.clear.frame(width: 45)
+                Color.clear.frame(width: 45, height: 1)
             }
             .padding(14)
             Divider()

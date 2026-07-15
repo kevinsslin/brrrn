@@ -63,6 +63,7 @@ enum ScreenshotGenerator {
                 .frame(width: 390),
             to: directory.appendingPathComponent("pit-setup.png")
         )
+
     }
 
     private static func render(_ view: some View, to url: URL) throws {
