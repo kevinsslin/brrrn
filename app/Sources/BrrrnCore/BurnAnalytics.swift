@@ -118,7 +118,7 @@ public enum BurnAnalytics {
     /// idle weekend does not dilute the shape of a normal working day.
     public static func rhythm(
         entries: [BurnReport.DailyEntry],
-        lookbackDays: Int = 14,
+        lookbackDays: Int = 30,
         endingAt end: Date = Date(),
         timeZone: TimeZone = .current
     ) -> BurnRhythm {
