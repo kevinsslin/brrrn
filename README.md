@@ -46,7 +46,13 @@ download budget so it stays that way.
 
 ## Install
 
-Build from source (Rust + Swift toolchains, macOS 14+):
+**Download** the latest `BrrrnBar.app.zip` from
+[Releases](https://github.com/kevinsslin/brrrn/releases), unzip, and move it
+to Applications. The bundle is not yet code-signed, so the first launch
+needs right-click → Open (signed, notarized builds are on the
+[roadmap](#roadmap)).
+
+**Or build from source** (Rust + Swift toolchains, macOS 14+):
 
 ```sh
 git clone https://github.com/kevinsslin/brrrn
@@ -55,9 +61,7 @@ cd brrrn/app
 open dist/BrrrnBar.app
 ```
 
-The bundle embeds the CLI, so that is the only build step you need. Signed
-GitHub Releases, a Homebrew tap, and `cargo install brrrn` are on the
-[roadmap](#roadmap).
+The bundle embeds the CLI, so that is the only build step you need.
 
 ## CLI quick start
 
