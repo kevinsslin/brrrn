@@ -25,13 +25,9 @@ struct BrrrnMenuView: View {
                     MeHeader(report: model.report)
                     if let report = model.report {
                         if let daily = report.daily {
-                            DailyHeatmap(
-                                title: "BURN CALENDAR",
-                                grid: UTCActivityGrid(
-                                    entries: daily,
-                                    weeks: 12,
-                                    thresholdUSD: report.streak?.thresholdUSD ?? StreakPolicy.defaultThresholdUSD
-                                )
+                            AnalyticsSection(
+                                daily: daily,
+                                thresholdUSD: report.streak?.thresholdUSD ?? StreakPolicy.defaultThresholdUSD
                             )
                         } else {
                             BurnCalendarUnavailable()
@@ -95,6 +91,81 @@ private struct MeHeader: View {
                     .foregroundStyle(.secondary)
             }
         }
+    }
+}
+
+private struct AnalyticsSection: View {
+    let daily: [BurnReport.DailyEntry]
+    let thresholdUSD: Double
+
+    @AppStorage("analyticsTab") private var tabRaw = AnalyticsTab.calendar.rawValue
+
+    private enum AnalyticsTab: String, CaseIterable {
+        case calendar
+        case trend
+        case rhythm
+
+        var label: String {
+            switch self {
+            case .calendar: "Calendar"
+            case .trend: "Trend"
+            case .rhythm: "Rhythm"
+            }
+        }
+    }
+
+    private var tab: AnalyticsTab {
+        AnalyticsTab(rawValue: tabRaw) ?? .calendar
+    }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            Picker("Analytics view", selection: $tabRaw) {
+                ForEach(AnalyticsTab.allCases, id: \.rawValue) { tab in
+                    Text(tab.label).tag(tab.rawValue)
+                }
+            }
+            .pickerStyle(.segmented)
+            .labelsHidden()
+            .controlSize(.small)
+
+            switch tab {
+            case .calendar:
+                DailyHeatmap(
+                    title: "BURN CALENDAR",
+                    grid: UTCActivityGrid(
+                        entries: daily,
+                        weeks: 12,
+                        thresholdUSD: thresholdUSD
+                    )
+                )
+            case .trend:
+                BurnTrendChart(
+                    points: BurnAnalytics.trend(entries: daily, days: 30),
+                    streakThresholdUSD: thresholdUSD
+                )
+            case .rhythm:
+                let rhythm = BurnAnalytics.rhythm(entries: daily)
+                if rhythm.hasData {
+                    BurnRhythmChart(rhythm: rhythm)
+                } else {
+                    RhythmUnavailable()
+                }
+            }
+        }
+    }
+}
+
+private struct RhythmUnavailable: View {
+    var body: some View {
+        VStack(alignment: .leading, spacing: 6) {
+            Label("No hourly data yet", systemImage: "clock.badge.questionmark")
+                .font(.callout.weight(.medium))
+            Text("Hour-of-day rhythm appears after the engine's next scan with hourly tracking.")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+        }
+        .frame(minHeight: 96)
     }
 }
 
@@ -192,7 +263,7 @@ private struct ModelRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { isHovered = $0 }
+        .delayedHover($isHovered)
         .onExitCommand { isPinned = false }
         .accessibilityLabel("\(presentation.provider.accessibilityName), \(model.model), \(presentation.variantLabel), \(model.costUSD.map(Format.money) ?? "cost unavailable")")
         .accessibilityHint("Shows token details")
@@ -348,7 +419,7 @@ private struct MemberRow: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .onHover { showDetail = $0 }
+        .delayedHover($showDetail)
         .popover(isPresented: $showDetail, arrowEdge: .trailing) {
             VStack(alignment: .leading, spacing: 10) {
                 Text(member.handle).font(.headline)

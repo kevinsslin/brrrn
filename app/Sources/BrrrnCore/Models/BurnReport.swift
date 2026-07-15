@@ -165,17 +165,32 @@ public struct BurnReport: Codable, Sendable, Equatable {
         public var date: String
         public var tokens: Int
         public var costUSD: Double
+        /// Cost per hour of day (24 buckets, engine timezone). Absent on
+        /// engines older than the hourly cache format.
+        public var hours: [Double]?
+        /// Tokens per hour of day, parallel to `hours`.
+        public var hourTokens: [Int]?
 
         enum CodingKeys: String, CodingKey {
             case date
             case tokens
             case costUSD = "cost_usd"
+            case hours
+            case hourTokens = "hour_tokens"
         }
 
-        public init(date: String, tokens: Int = 0, costUSD: Double = 0) {
+        public init(
+            date: String,
+            tokens: Int = 0,
+            costUSD: Double = 0,
+            hours: [Double]? = nil,
+            hourTokens: [Int]? = nil
+        ) {
             self.date = date
             self.tokens = tokens
             self.costUSD = costUSD
+            self.hours = hours
+            self.hourTokens = hourTokens
         }
 
         /// Parses the "yyyy-MM-dd" date string as a UTC day start.
