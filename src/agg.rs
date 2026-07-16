@@ -129,6 +129,7 @@ pub struct HourAgg {
 #[derive(Default)]
 pub struct Agg {
     pub by_key: HashMap<Key, (Usage, Option<f64>)>,
+    pub daily_by_key: BTreeMap<NaiveDate, HashMap<Key, (Usage, Option<f64>)>>,
     pub daily: BTreeMap<NaiveDate, BTreeMap<Source, DayAgg>>,
     pub hourly: BTreeMap<NaiveDate, [HourAgg; 24]>,
     pub daily_models: BTreeMap<NaiveDate, BTreeMap<String, DayModel>>,
@@ -159,14 +160,13 @@ impl Agg {
             model: e.model.clone(),
             speed: e.speed.clone(),
         };
-        let slot = self
-            .by_key
-            .entry(key)
-            .or_insert_with(|| (Usage::default(), cost.map(|_| 0.0)));
-        slot.0.add(&e.usage);
-        if let (Some(c), Some(total)) = (cost, slot.1.as_mut()) {
-            *total += c;
-        }
+        add_key_usage(&mut self.by_key, key.clone(), &e.usage, cost);
+        add_key_usage(
+            self.daily_by_key.entry(e.date).or_default(),
+            key,
+            &e.usage,
+            cost,
+        );
 
         let day = self
             .daily
@@ -204,6 +204,21 @@ impl Agg {
     /// Full-history daily cost used as streak input.
     pub fn daily_cost(&self) -> &BTreeMap<NaiveDate, f64> {
         &self.streak_daily_cost
+    }
+}
+
+fn add_key_usage(
+    totals: &mut HashMap<Key, (Usage, Option<f64>)>,
+    key: Key,
+    usage: &Usage,
+    cost: Option<f64>,
+) {
+    let slot = totals
+        .entry(key)
+        .or_insert_with(|| (Usage::default(), cost.map(|_| 0.0)));
+    slot.0.add(usage);
+    if let (Some(cost), Some(total)) = (cost, slot.1.as_mut()) {
+        *total += cost;
     }
 }
 
