@@ -9,6 +9,22 @@ import BrrrnCore
 enum ScreenshotGenerator {
     static func runIfRequested() {
         let arguments = CommandLine.arguments
+        if let flagIndex = arguments.firstIndex(of: "--screenshots-real") {
+            let directory = arguments.indices.contains(flagIndex + 1)
+                ? arguments[flagIndex + 1]
+                : "screenshots-real"
+            Task { @MainActor in
+                do {
+                    try await generateReal(into: URL(fileURLWithPath: directory, isDirectory: true))
+                    print("real-data screenshots written to \(directory)")
+                    exit(0)
+                } catch {
+                    FileHandle.standardError.write(Data("screenshot generation failed: \(error)\n".utf8))
+                    exit(1)
+                }
+            }
+            RunLoop.main.run()
+        }
         guard let flagIndex = arguments.firstIndex(of: "--screenshots") else { return }
         let directory = arguments.indices.contains(flagIndex + 1)
             ? arguments[flagIndex + 1]
@@ -20,6 +36,47 @@ enum ScreenshotGenerator {
         } catch {
             FileHandle.standardError.write(Data("screenshot generation failed: \(error)\n".utf8))
             exit(1)
+        }
+    }
+
+    /// Same views, the operator's real data. Never used for the README
+    /// (that stays on seeded demo data); this is for sharing your own burn.
+    static func generateReal(into directory: URL) async throws {
+        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        guard let binary = BinaryLocator().locate() else { throw EngineError.binaryNotFound }
+
+        let model = AppModel()
+        async let all = LocalEngine.allTimeReport(binary: binary)
+        async let week = LocalEngine.weekReport(binary: binary)
+        async let day = LocalEngine.todayReport(binary: binary)
+        async let month = LocalEngine.monthReport(binary: binary)
+        let (allReport, weekReport, dayReport, monthReport) = try await (all, week, day, month)
+        model.report = allReport
+        model.weekReport = weekReport
+        model.todayReport = dayReport
+        model.monthReport = monthReport
+        model.lastUpdated = Date()
+        if let config = BrrrnConfig.loadDefault(), config.hasPits {
+            model.boards = (try? await PitClient().boards(config: config)) ?? []
+            model.configOverride = config
+        }
+
+        let defaults = UserDefaults.standard
+        defaults.set("me", forKey: "rootTab")
+        for tab in ["calendar", "trend", "rhythm", "records"] {
+            defaults.set(tab, forKey: "analyticsTab")
+            try render(
+                BrrrnMenuView(model: model, snapshotMode: true).frame(width: 390),
+                to: directory.appendingPathComponent("menu-\(tab).png")
+            )
+        }
+        if !model.boards.isEmpty {
+            defaults.set("pits", forKey: "rootTab")
+            try render(
+                BrrrnMenuView(model: model, snapshotMode: true).frame(width: 390),
+                to: directory.appendingPathComponent("menu-pits.png")
+            )
+            defaults.set("me", forKey: "rootTab")
         }
     }
 
