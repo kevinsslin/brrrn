@@ -46,15 +46,11 @@ enum ScreenshotGenerator {
         guard let binary = BinaryLocator().locate() else { throw EngineError.binaryNotFound }
 
         let model = AppModel()
-        async let all = LocalEngine.allTimeReport(binary: binary)
-        async let week = LocalEngine.weekReport(binary: binary)
-        async let day = LocalEngine.todayReport(binary: binary)
-        async let month = LocalEngine.monthReport(binary: binary)
-        let (allReport, weekReport, dayReport, monthReport) = try await (all, week, day, month)
-        model.report = allReport
-        model.weekReport = weekReport
-        model.todayReport = dayReport
-        model.monthReport = monthReport
+        let reports = try await LocalEngine.refreshReports(binary: binary)
+        model.report = reports.all
+        model.weekReport = reports.week
+        model.todayReport = reports.today
+        model.monthReport = reports.month
         model.lastUpdated = Date()
         if let config = BrrrnConfig.loadDefault(), config.hasPits {
             model.boards = (try? await PitClient().boards(config: config)) ?? []
@@ -262,7 +258,7 @@ enum ScreenshotGenerator {
     private static func streakDays(daily: [BurnReport.DailyEntry]) -> Int {
         var run = 0
         for (index, entry) in daily.enumerated().reversed() {
-            if entry.costUSD >= 5 {
+            if StreakPolicy.meetsThreshold(costUSD: entry.costUSD, thresholdUSD: 5) {
                 run += 1
             } else if index == daily.count - 1 {
                 continue // incomplete today does not break the streak

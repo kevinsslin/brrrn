@@ -60,6 +60,14 @@ final class AppModel: ObservableObject {
     }
 
     func models(for period: ModelPeriod) -> [BurnReport.ModelUsage] {
+        if let bundled = report?.modelsByPeriod {
+            let rows = switch period {
+            case .today: bundled.today
+            case .week: bundled.week
+            case .month: bundled.month
+            }
+            return Array(ModelSort.byCostDescending(ModelMerge.foldFastMode(rows)).prefix(24))
+        }
         let source = switch period {
         case .today: todayReport
         case .week: weekReport
@@ -117,15 +125,11 @@ final class AppModel: ObservableObject {
         defer { isRefreshing = false }
 
         do {
-            async let all = LocalEngine.allTimeReport(binary: binary)
-            async let week = LocalEngine.weekReport(binary: binary)
-            async let day = LocalEngine.todayReport(binary: binary)
-            async let month = LocalEngine.monthReport(binary: binary)
-            let (newReport, newWeek, newDay, newMonth) = try await (all, week, day, month)
-            report = newReport
-            weekReport = newWeek
-            todayReport = newDay
-            monthReport = newMonth
+            let reports = try await LocalEngine.refreshReports(binary: binary)
+            report = reports.all
+            weekReport = reports.week
+            todayReport = reports.today
+            monthReport = reports.month
             errorMessage = nil
             lastUpdated = Date()
         } catch {

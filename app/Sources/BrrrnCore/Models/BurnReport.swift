@@ -10,6 +10,9 @@ public struct BurnReport: Codable, Sendable, Equatable {
     public var bySource: [String: SourceCosts]?
     public var streak: Streak?
     public var byModel: [ModelUsage]
+    /// Newer all-period reports carry these slices so one scan can refresh
+    /// every by-model tab. Older engines omit the field.
+    public var modelsByPeriod: ModelsByPeriod?
     public var daily: [DailyEntry]?
 
     enum CodingKeys: String, CodingKey {
@@ -20,6 +23,7 @@ public struct BurnReport: Codable, Sendable, Equatable {
         case bySource = "by_source"
         case streak
         case byModel = "by_model"
+        case modelsByPeriod = "models_by_period"
         case daily
     }
 
@@ -31,6 +35,7 @@ public struct BurnReport: Codable, Sendable, Equatable {
         bySource: [String: SourceCosts]? = nil,
         streak: Streak? = nil,
         byModel: [ModelUsage] = [],
+        modelsByPeriod: ModelsByPeriod? = nil,
         daily: [DailyEntry]? = nil
     ) {
         self.period = period
@@ -40,6 +45,7 @@ public struct BurnReport: Codable, Sendable, Equatable {
         self.bySource = bySource
         self.streak = streak
         self.byModel = byModel
+        self.modelsByPeriod = modelsByPeriod
         self.daily = daily
     }
 
@@ -162,6 +168,18 @@ public struct BurnReport: Codable, Sendable, Equatable {
             self.reasoningTokens = reasoningTokens
             self.totalTokens = totalTokens
             self.costUSD = costUSD
+        }
+    }
+
+    public struct ModelsByPeriod: Codable, Sendable, Equatable {
+        public var today: [ModelUsage]
+        public var week: [ModelUsage]
+        public var month: [ModelUsage]
+
+        public init(today: [ModelUsage], week: [ModelUsage], month: [ModelUsage]) {
+            self.today = today
+            self.week = week
+            self.month = month
         }
     }
 
