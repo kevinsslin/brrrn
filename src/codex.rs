@@ -120,10 +120,9 @@ pub fn scan_file(
         prev = Some(total);
 
         let ts = v["timestamp"].as_str().unwrap_or("");
-        let identity = format!(
-            "{ts}\0{}\0{}\0{}\0{}",
-            total.input, total.output, total.cached, total.reasoning
-        );
+        // Reasoning is an informational subset of output, so it must not
+        // distinguish otherwise identical billed totals.
+        let identity = format!("{ts}\0{}\0{}\0{}", total.input, total.output, total.cached);
         let hash = stable_hash(identity.as_bytes());
         if !seen.insert(hash) {
             if !local_claims.contains(&hash) {
@@ -373,7 +372,7 @@ mod tests {
     }
 
     #[test]
-    fn distinct_reasoning_totals_are_not_deduped() {
+    fn reasoning_metadata_does_not_duplicate_identical_billed_totals() {
         let first = token_count(
             "2026-07-13T10:00:01Z",
             u(1000, 400, 100, 40),
@@ -392,7 +391,7 @@ mod tests {
         let (eb, _, _, _) = scan_file(&b, &mut seen, true);
 
         assert_eq!(ea.len(), 1);
-        assert_eq!(eb.len(), 1);
+        assert!(eb.is_empty());
     }
 
     #[test]
