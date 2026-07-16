@@ -200,14 +200,17 @@ public enum BurnAnalytics {
         var previousDay: Date?
         var currentRunEnd: Date?
         for key in costByKey.keys.sorted() {
-            guard costByKey[key, default: 0] >= thresholdUSD,
+            guard StreakPolicy.meetsThreshold(
+                costUSD: costByKey[key, default: 0],
+                thresholdUSD: thresholdUSD
+            ),
                   let day = BurnReport.DailyEntry(date: key).dateValue
             else { continue }
             let continues = previousDay.flatMap { calendar.date(byAdding: .day, value: 1, to: $0) } == day
             runLength = continues ? runLength + 1 : 1
             previousDay = day
             currentRunEnd = day
-            if runLength > longest {
+            if runLength >= longest {
                 longest = runLength
                 longestEnd = day
             }
@@ -221,7 +224,10 @@ public enum BurnAnalytics {
                 longestIsCurrent = true
             } else if let yesterday = calendar.date(byAdding: .day, value: -1, to: todayStart),
                       longestEnd == yesterday,
-                      costByKey[todayKey, default: 0] < thresholdUSD {
+                      !StreakPolicy.meetsThreshold(
+                          costUSD: costByKey[todayKey, default: 0],
+                          thresholdUSD: thresholdUSD
+                      ) {
                 longestIsCurrent = true
             }
         }

@@ -2,14 +2,19 @@ import Foundation
 
 /// Folds fast-mode rows into their base variant. Claude logs fast mode as
 /// `speed: "fast"`; Codex logs the priority service tier as a "priority"
-/// word in the variant. Both are the same product idea (pay more per token
-/// for lower latency) and neither has published tier pricing, so a separate
-/// row would just split one model's number in two. The fold keeps the
-/// fast-mode share on the merged row for hover detail.
+/// word in the variant. Both are the same product idea, so a separate row
+/// would split one model's number in two. The engine applies published tier
+/// rates before this fold, which keeps the fast-mode share for hover detail.
 public enum ModelMerge {
+    private struct ModelKey: Hashable {
+        var source: String
+        var model: String
+        var speed: String
+    }
+
     public static func foldFastMode(_ rows: [BurnReport.ModelUsage]) -> [BurnReport.ModelUsage] {
-        var merged: [String: BurnReport.ModelUsage] = [:]
-        var order: [String] = []
+        var merged: [ModelKey: BurnReport.ModelUsage] = [:]
+        var order: [ModelKey] = []
 
         for row in rows {
             let words = (row.speed ?? "")
@@ -22,7 +27,7 @@ public enum ModelMerge {
             // of the same model would land in different buckets.
             let dropped: Set<String> = ["fast", "priority", "standard", "default", "none"]
             let base = words.filter { !dropped.contains($0) }.joined(separator: " ")
-            let key = "\(row.source)|\(row.model)|\(base)"
+            let key = ModelKey(source: row.source, model: row.model, speed: base)
 
             var target = merged[key] ?? {
                 order.append(key)

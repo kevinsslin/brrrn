@@ -187,6 +187,43 @@ final class BurnAnalyticsTests: XCTestCase {
         XCTAssertTrue(records.longestStreakIsCurrent)
     }
 
+    func testRecordsPreferOngoingStreakWhenItTiesTheHistoricalLongest() {
+        let entries = [
+            BurnReport.DailyEntry(date: "2026-07-01", costUSD: 9),
+            BurnReport.DailyEntry(date: "2026-07-02", costUSD: 10),
+            BurnReport.DailyEntry(date: "2026-07-12", costUSD: 9),
+            BurnReport.DailyEntry(date: "2026-07-13", costUSD: 10),
+            BurnReport.DailyEntry(date: "2026-07-14", costUSD: 1),
+        ]
+
+        let records = BurnAnalytics.records(
+            entries: entries,
+            thresholdUSD: 5,
+            endingAt: utcDate(2026, 7, 14)
+        )
+
+        XCTAssertEqual(records.longestStreakDays, 2)
+        XCTAssertEqual(records.longestStreakEnd.map(BurnAnalytics.dateKey), "2026-07-13")
+        XCTAssertTrue(records.longestStreakIsCurrent)
+    }
+
+    func testRecordsNormalizeAccumulatedCostsAtTheStreakThreshold() {
+        let accumulated = (0..<50).reduce(0.0) { total, _ in total + 0.1 }
+        let entries = [
+            BurnReport.DailyEntry(date: "2026-07-13", costUSD: accumulated),
+            BurnReport.DailyEntry(date: "2026-07-14", costUSD: accumulated),
+        ]
+
+        let records = BurnAnalytics.records(
+            entries: entries,
+            thresholdUSD: 5,
+            endingAt: utcDate(2026, 7, 14)
+        )
+
+        XCTAssertEqual(records.longestStreakDays, 2)
+        XCTAssertTrue(records.longestStreakIsCurrent)
+    }
+
     func testPitInviteParsingRoundTrips() {
         XCTAssertEqual(PitInvite.parse("ember-fox-7k2m").code, "ember-fox-7k2m")
         XCTAssertNil(PitInvite.parse("ember-fox-7k2m").hubURL)

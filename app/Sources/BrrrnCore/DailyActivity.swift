@@ -2,6 +2,15 @@ import Foundation
 
 public enum StreakPolicy {
     public static let defaultThresholdUSD = 5.0
+    private static let costPrecision = 1_000_000.0
+
+    public static func stableCostUSD(_ costUSD: Double) -> Double {
+        (costUSD * costPrecision).rounded() / costPrecision
+    }
+
+    public static func meetsThreshold(costUSD: Double, thresholdUSD: Double) -> Bool {
+        stableCostUSD(costUSD) >= thresholdUSD
+    }
 }
 
 public enum DailyCostLevel: Int, CaseIterable, Sendable, Equatable {
@@ -74,10 +83,16 @@ public struct UTCActivityGrid: Sendable, Equatable {
 
         var streakDates = Set<String>()
         var cursor = endDay
-        if (values[Self.dateKey(cursor)]?.cost ?? 0) < effectiveThreshold {
+        if !StreakPolicy.meetsThreshold(
+            costUSD: values[Self.dateKey(cursor)]?.cost ?? 0,
+            thresholdUSD: effectiveThreshold
+        ) {
             cursor = calendar.date(byAdding: .day, value: -1, to: cursor)!
         }
-        while (values[Self.dateKey(cursor)]?.cost ?? 0) >= effectiveThreshold {
+        while StreakPolicy.meetsThreshold(
+            costUSD: values[Self.dateKey(cursor)]?.cost ?? 0,
+            thresholdUSD: effectiveThreshold
+        ) {
             streakDates.insert(Self.dateKey(cursor))
             cursor = calendar.date(byAdding: .day, value: -1, to: cursor)!
         }
@@ -125,10 +140,11 @@ public struct UTCActivityGrid: Sendable, Equatable {
 
     private static func level(cost: Double, threshold: Double, isFuture: Bool) -> DailyCostLevel {
         if isFuture || cost <= 0 { return .none }
-        if cost < threshold { return .belowThreshold }
-        if cost < threshold * 5 { return .active }
-        if cost < threshold * 20 { return .high }
-        if cost < threshold * 100 { return .veryHigh }
+        let stableCost = StreakPolicy.stableCostUSD(cost)
+        if stableCost < threshold { return .belowThreshold }
+        if stableCost < threshold * 5 { return .active }
+        if stableCost < threshold * 20 { return .high }
+        if stableCost < threshold * 100 { return .veryHigh }
         return .extreme
     }
 
@@ -143,7 +159,9 @@ public struct UTCActivityGrid: Sendable, Equatable {
         if isFuture { return .future }
         if !hasRecord { return .noUsage }
         if cost <= 0 && tokens > 0 { return .unpriced }
-        if cost < threshold { return .belowThreshold }
+        if !StreakPolicy.meetsThreshold(costUSD: cost, thresholdUSD: threshold) {
+            return .belowThreshold
+        }
         if isCurrentStreak { return .currentStreak }
         return .thresholdMet
     }
