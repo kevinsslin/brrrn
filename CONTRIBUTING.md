@@ -3,6 +3,11 @@
 Thanks for helping people burn tokens together. This page covers setup,
 testing, and the conventions the codebase already follows.
 
+Working with a coding agent (Codex, Claude Code, ...)? [AGENTS.md](AGENTS.md)
+is the canonical machine-readable version of these rules, and
+`.agents/skills/` has step-by-step recipes for verifying, screenshots,
+releases, and hub deploys.
+
 ## Setup
 
 You need a Rust toolchain (stable), Swift 6 / Xcode command line tools on

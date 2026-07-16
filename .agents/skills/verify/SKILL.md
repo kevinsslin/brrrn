@@ -1,6 +1,6 @@
 ---
 name: verify
-summary: Runtime verification recipes for brrrn surfaces
+description: Runtime verification recipes for all three brrrn surfaces, beyond the unit suites.
 ---
 
 # Verify brrrn
