@@ -4,6 +4,38 @@ All notable changes to brrrn are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.2] - 2026-07-17
+
+Cost-accounting audit release. The pricing and token math was audited end
+to end (headless Codex, gpt-5.6-sol at x-high reasoning, adversarially
+reviewed before merge); every fix below carries a test that fails without
+it. On the audited corpus the corrections add about **$2,028 of previously
+undercounted all-time burn**, dominated by priority-tier pricing.
+
+### Fixed
+
+- **Priority/flex service tiers now use LiteLLM's tier-specific rates**
+  (`input_cost_per_token_priority` and friends) instead of standard rates.
+  Priority usage was undercounted by roughly 2x.
+- Claude records with `usage.iterations` (fallback and compaction) are
+  billed per iteration; free pre-output refusals are excluded.
+- Partial streaming records no longer beat later finalized usage with the
+  same identity; log traversal prefers the newest file so resumed sessions
+  keep the richest copy.
+- Streak threshold comparisons are stable at microdollar precision across
+  Rust, Swift, and the hub, so fifty $0.10 entries cannot sum to
+  $4.999999... and break a streak.
+- Hub cost rounding preserves decimal half-ties.
+- App model-merge keys can no longer collide across source/model/variant;
+  an ongoing streak that ties the historical record now shows as current.
+
+### Changed
+
+- App refresh runs one engine scan instead of four (warm refresh 0.22s to
+  0.13s wall, cold 26.3s to 6.0s CPU) via an additive `models_by_period`
+  JSON field, with a fallback for older engines.
+- Cache format v7 (one-time full rescan on first run).
+
 ## [0.1.1] - 2026-07-16
 
 ### Added
@@ -81,5 +113,6 @@ First public release. 🔥
   until public tier pricing exists.
 - Models without a public LiteLLM price show `n/a` cost.
 
+[0.1.2]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.2
 [0.1.1]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.1
 [0.1.0]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.0
