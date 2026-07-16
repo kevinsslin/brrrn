@@ -1217,16 +1217,20 @@ async function getBoard(env, code, now) {
   const pit = await pitExists(env.BRRRN_KV, code);
   if (!pit) return error('pit not found', 404, true);
   const memberKeys = await listKeys(env.BRRRN_KV, `member:${code}:`);
-  const memberValues = await kvJsonValues(env.BRRRN_KV, memberKeys);
-  const members = await Promise.all(memberKeys.map(async (key) => {
-    const handle = key.slice(`member:${code}:`.length);
-    const records = await dailyRecords(env, `day:${code}:${handle}:`);
+  const memberPrefix = `member:${code}:`;
+  const handles = memberKeys.map((key) => key.slice(memberPrefix.length));
+  const [memberValues, recordsByMember] = await Promise.all([
+    kvJsonValues(env.BRRRN_KV, memberKeys),
+    Promise.all(handles.map((handle) => dailyRecords(env, `day:${code}:${handle}:`))),
+  ]);
+  const members = memberKeys.map((key, index) => {
+    const handle = handles[index];
     return {
       handle,
       display_name: memberValues.get(key)?.display_name ?? null,
-      ...aggregateMember(records, now),
+      ...aggregateMember(recordsByMember[index], now),
     };
-  }));
+  });
   members.sort((a, b) => b.today_usd - a.today_usd || a.handle.localeCompare(b.handle));
   return json({ name: pit.name ?? null, code, streak_threshold_usd: STREAK_THRESHOLD_USD, members }, 200, true);
 }
