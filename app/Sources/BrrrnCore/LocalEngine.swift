@@ -23,6 +23,25 @@ public enum EngineError: Error, LocalizedError, Sendable {
 
 /// Runs the brrrn CLI off the main thread and decodes its JSON output.
 public enum LocalEngine {
+    public struct RefreshedReports: Sendable, Equatable {
+        public var all: BurnReport
+        public var today: BurnReport?
+        public var week: BurnReport?
+        public var month: BurnReport?
+
+        public init(
+            all: BurnReport,
+            today: BurnReport? = nil,
+            week: BurnReport? = nil,
+            month: BurnReport? = nil
+        ) {
+            self.all = all
+            self.today = today
+            self.week = week
+            self.month = month
+        }
+    }
+
     /// Watchdog limit: a cold scan takes about 8 seconds, so this is generous.
     public static let timeoutSeconds: TimeInterval = 90
 
@@ -44,6 +63,34 @@ public enum LocalEngine {
     /// `brrrn --period month --json`
     public static func monthReport(binary: String) async throws -> BurnReport {
         try await report(binary: binary, arguments: ["--period", "month", "--json"])
+    }
+
+    /// Newer engines bundle period model rows into the all-period report.
+    /// Fall back to the three legacy period calls when that field is absent.
+    public static func refreshReports(binary: String) async throws -> RefreshedReports {
+        try await refreshReports { arguments in
+            try await report(binary: binary, arguments: arguments)
+        }
+    }
+
+    static func refreshReports(
+        loader: @escaping @Sendable ([String]) async throws -> BurnReport
+    ) async throws -> RefreshedReports {
+        let all = try await loader(["--json"])
+        if all.modelsByPeriod != nil {
+            return RefreshedReports(all: all)
+        }
+
+        async let today = loader(["--period", "today", "--json"])
+        async let week = loader(["--period", "week", "--json"])
+        async let month = loader(["--period", "month", "--json"])
+        let (todayReport, weekReport, monthReport) = try await (today, week, month)
+        return RefreshedReports(
+            all: all,
+            today: todayReport,
+            week: weekReport,
+            month: monthReport
+        )
     }
 
     public static func report(binary: String, arguments: [String]) async throws -> BurnReport {

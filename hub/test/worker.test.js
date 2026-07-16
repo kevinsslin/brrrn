@@ -8,6 +8,7 @@ class MockKV {
   constructor() {
     this.store = new Map();
     this.bulkGetKeys = [];
+    this.listPrefixes = [];
     this.getMisses = new Map();
     this.putFailures = new Map();
     this.deleteFailures = new Map();
@@ -125,6 +126,7 @@ class MockKV {
   }
 
   async list({ prefix = '' } = {}) {
+    this.listPrefixes.push(prefix);
     const keys = [...this.store.keys()]
       .filter((k) => k.startsWith(prefix))
       .sort()
@@ -2138,6 +2140,33 @@ test('board sorts members by today_usd desc', async () => {
   }
   const board = await call(env, 'GET', `/pit/${code}/board`);
   assert.deepEqual(board.data.members.map((m) => m.handle), ['high', 'mid', 'low']);
+});
+
+test('legacy board starts day reads while member metadata is loading', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'concurrent reads');
+  for (const handle of ['alice', 'bob', 'carol']) {
+    await join(env, code, handle, 's');
+    await call(env, 'POST', `/pit/${code}/submit`, {
+      handle,
+      secret: 's',
+      machine_id: 'laptop',
+      days: [sampleDay()],
+    });
+  }
+
+  env.BRRRN_KV.listPrefixes = [];
+  const releaseMemberRead = env.BRRRN_KV.blockNextBulkGets(1);
+  const boardPromise = call(env, 'GET', `/pit/${code}/board`);
+  await new Promise((resolve) => setTimeout(resolve, 0));
+
+  assert.equal(
+    env.BRRRN_KV.listPrefixes.some((prefix) => prefix.startsWith(`day:${code}:`)),
+    true,
+  );
+  releaseMemberRead();
+  const board = await boardPromise;
+  assert.equal(board.status, 200);
 });
 
 test('any member can retitle a pit; outsiders and impostors cannot', async () => {

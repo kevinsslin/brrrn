@@ -123,6 +123,22 @@ final class DailyActivityTests: XCTestCase {
         }
     }
 
+    func testMicrodollarNormalizationCountsAccumulatedThresholdAsMet() {
+        let entries = (0..<50).map { _ in
+            entry("2026-07-14", cost: 0.1)
+        }
+        let grid = UTCActivityGrid(
+            entries: entries,
+            weeks: 1,
+            endingAt: utcDate(2026, 7, 14),
+            thresholdUSD: 5
+        )
+
+        XCTAssertEqual(grid.currentStreakDays, 1)
+        XCTAssertEqual(cell("2026-07-14", in: grid).level, .active)
+        XCTAssertEqual(cell("2026-07-14", in: grid).status, .currentStreak)
+    }
+
     private func cell(_ date: String, in grid: UTCActivityGrid) -> DailyActivityCell {
         grid.cells.first(where: { $0.dateKey == date })!
     }

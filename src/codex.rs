@@ -61,9 +61,9 @@ pub fn scan_file(
             }
         }
 
-        // Service tier rides along in settings records (thread_settings);
-        // "priority" processing doubles the per-token price, so it is part
-        // of the variant identity like reasoning effort.
+        // Service tier rides along in settings records (thread_settings).
+        // It selects LiteLLM priority or flex rates and is part of the
+        // variant identity like reasoning effort.
         if line.contains("\"service_tier\"") {
             if let Ok(v) = serde_json::from_str::<serde_json::Value>(&line) {
                 let p = &v["payload"];
@@ -120,6 +120,8 @@ pub fn scan_file(
         prev = Some(total);
 
         let ts = v["timestamp"].as_str().unwrap_or("");
+        // Reasoning is an informational subset of output, so it must not
+        // distinguish otherwise identical billed totals.
         let identity = format!("{ts}\0{}\0{}\0{}", total.input, total.output, total.cached);
         let hash = stable_hash(identity.as_bytes());
         if !seen.insert(hash) {
@@ -367,6 +369,29 @@ mod tests {
 
         let total: u64 = ea.iter().chain(eb.iter()).map(|e| e.usage.total()).sum();
         assert_eq!(total, 1100 + 850); // no double counting of the replay
+    }
+
+    #[test]
+    fn reasoning_metadata_does_not_duplicate_identical_billed_totals() {
+        let first = token_count(
+            "2026-07-13T10:00:01Z",
+            u(1000, 400, 100, 40),
+            u(1000, 400, 100, 40),
+        );
+        let second = token_count(
+            "2026-07-13T10:00:01Z",
+            u(1000, 400, 100, 60),
+            u(1000, 400, 100, 60),
+        );
+        let a = fixture("reasoning-a.jsonl", &first);
+        let b = fixture("reasoning-b.jsonl", &second);
+
+        let mut seen = HashSet::new();
+        let (ea, _, _, _) = scan_file(&a, &mut seen, true);
+        let (eb, _, _, _) = scan_file(&b, &mut seen, true);
+
+        assert_eq!(ea.len(), 1);
+        assert!(eb.is_empty());
     }
 
     #[test]

@@ -16,6 +16,7 @@ const {
   addDays,
   isoWeekStart,
   monthStart,
+  stableCost,
   validateDays,
   mergeDayRecords,
   computeStreak,
@@ -314,6 +315,24 @@ test('validateDays canonicalizes accepted costs to micro-dollar precision', () =
     cx: 1.265432,
     models: { precise: { i: 80, o: 20, c: 2.5 } },
   });
+});
+
+test('micro-dollar rounding treats decimal ties consistently', () => {
+  assert.equal(stableCost(1.0000025), 1.000003);
+  assert.equal(stableCost(1.0000024999999), 1.000002);
+  assert.equal(stableCost(1.0000025000001), 1.000003);
+
+  const first = validateDays([day({ cost_usd: 1.0000025 })]);
+  const second = validateDays([day({ cost_usd: 3.999997 })]);
+  assert.equal(first.ok, true);
+  assert.equal(second.ok, true);
+
+  const aggregate = aggregateMember([
+    { '2026-01-07': first.days[0].rec },
+    { '2026-01-07': second.days[0].rec },
+  ], NOW);
+  assert.equal(aggregate.today_usd, 5);
+  assert.equal(aggregate.streak_days, 1);
 });
 
 test('validateDays treats missing split and models as zero', () => {

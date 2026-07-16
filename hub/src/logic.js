@@ -11,7 +11,18 @@ export const MAX_DAILY_USD = 1_000_000;
 export const MAX_MODELS_PER_MEMBER_RESPONSE = 30;
 
 export function stableCost(value) {
-  return Math.round(value * 1_000_000) / 1_000_000;
+  const scaled = value * 1_000_000;
+  const fraction = scaled - Math.floor(scaled);
+  const tieTolerance = Number.EPSILON * Math.max(1, Math.abs(scaled));
+  const tieDistance = Math.abs(fraction - 0.5);
+  if (tieDistance === 0 || tieDistance > tieTolerance) {
+    return Math.round(scaled) / 1_000_000;
+  }
+
+  // Decimal shifting preserves ties that binary multiplication can move below 0.5.
+  const [coefficient, exponent = '0'] = value.toString().split('e');
+  const microDollars = Number(`${coefficient}e${Number(exponent) + 6}`);
+  return Math.round(microDollars) / 1_000_000;
 }
 
 // Suffix charset: a-z0-9 without the ambiguous l/1/o/0.

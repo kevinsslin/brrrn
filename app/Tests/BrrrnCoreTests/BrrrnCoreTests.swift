@@ -2,6 +2,16 @@ import XCTest
 @testable import BrrrnCore
 
 final class BrrrnCoreTests: XCTestCase {
+    func testBurnReportDecodesOptionalModelsByPeriod() throws {
+        let data = #"{"windows":{"today":{"tokens":0,"cost_usd":0,"unpriced_tokens":0},"week":{"tokens":0,"cost_usd":0,"unpriced_tokens":0},"month":{"tokens":0,"cost_usd":0,"unpriced_tokens":0},"all":{"tokens":0,"cost_usd":0,"unpriced_tokens":0}},"by_model":[],"models_by_period":{"today":[{"source":"codex","model":"today-model","input_tokens":1,"output_tokens":2,"total_tokens":3,"cost_usd":4}],"week":[{"source":"codex","model":"week-model","input_tokens":1,"output_tokens":2,"total_tokens":3,"cost_usd":4}],"month":[{"source":"codex","model":"month-model","input_tokens":1,"output_tokens":2,"total_tokens":3,"cost_usd":4}]}}"#.data(using: .utf8)!
+
+        let report = try JSONDecoder().decode(BurnReport.self, from: data)
+
+        XCTAssertEqual(report.modelsByPeriod?.today.map(\.model), ["today-model"])
+        XCTAssertEqual(report.modelsByPeriod?.week.map(\.model), ["week-model"])
+        XCTAssertEqual(report.modelsByPeriod?.month.map(\.model), ["month-model"])
+    }
+
     func testBurnReportDecodesFrozenSchemaIncludingNullCost() throws {
         let data = #"""
         {
@@ -27,6 +37,7 @@ final class BrrrnCoreTests: XCTestCase {
         XCTAssertEqual(report.bySource?["codex"]?.weekUSD, 11)
         XCTAssertEqual(report.streak?.days, 12)
         XCTAssertNil(report.byModel[0].costUSD)
+        XCTAssertNil(report.modelsByPeriod)
         XCTAssertEqual(report.daily?.first?.dateValue, utcDate(2026, 7, 13))
     }
 

@@ -2,7 +2,7 @@ use std::collections::BTreeMap;
 
 use chrono::NaiveDate;
 
-use crate::agg::{Agg, Source};
+use crate::agg::{Agg, Key, Source, Usage};
 use crate::windows::{month_start, streak_days, week_start, STREAK_THRESHOLD_USD};
 
 pub fn fmt_tokens(n: u64) -> String {
@@ -166,33 +166,7 @@ fn source_json(agg: &Agg, src: Source, today: NaiveDate) -> serde_json::Value {
 /// Machine-readable output. This schema is frozen: the menu bar app decodes it.
 pub fn json_value(agg: &Agg, period: &str, today: NaiveDate, utc: bool) -> serde_json::Value {
     let first = agg.daily.keys().next().copied().unwrap_or(today);
-    let mut by_model: Vec<_> = agg
-        .by_key
-        .iter()
-        .map(|(k, (u, cost))| {
-            serde_json::json!({
-                "source": k.source.label(),
-                "model": k.model,
-                "speed": k.speed,
-                "input_tokens": u.input,
-                "cache_read_tokens": u.cache_read,
-                "cache_write_tokens": u.cache_w5m + u.cache_w1h,
-                "output_tokens": u.output,
-                "reasoning_tokens": u.reasoning,
-                "total_tokens": u.total(),
-                "cost_usd": cost,
-            })
-        })
-        .collect();
-    by_model.sort_by(|a, b| {
-        let ac = a["cost_usd"].as_f64().unwrap_or(-1.0);
-        let bc = b["cost_usd"].as_f64().unwrap_or(-1.0);
-        bc.partial_cmp(&ac)
-            .unwrap()
-            .then_with(|| a["source"].as_str().cmp(&b["source"].as_str()))
-            .then_with(|| a["model"].as_str().cmp(&b["model"].as_str()))
-            .then_with(|| a["speed"].as_str().cmp(&b["speed"].as_str()))
-    });
+    let by_model = model_rows_json(&agg.by_key);
     let daily: Vec<_> = agg
         .daily
         .iter()
@@ -209,7 +183,7 @@ pub fn json_value(agg: &Agg, period: &str, today: NaiveDate, utc: bool) -> serde
             entry
         })
         .collect();
-    serde_json::json!({
+    let mut value = serde_json::json!({
         "period": period,
         "tz": if utc { "utc" } else { "local" },
         "generated_on": today.to_string(),
@@ -229,7 +203,64 @@ pub fn json_value(agg: &Agg, period: &str, today: NaiveDate, utc: bool) -> serde
         },
         "by_model": by_model,
         "daily": daily,
-    })
+    });
+    if period == "all" {
+        value["models_by_period"] = serde_json::json!({
+            "today": model_window_json(agg, today, today),
+            "week": model_window_json(agg, week_start(today), today),
+            "month": model_window_json(agg, month_start(today), today),
+        });
+    }
+    value
+}
+
+fn model_window_json(agg: &Agg, from: NaiveDate, to: NaiveDate) -> Vec<serde_json::Value> {
+    let mut totals: std::collections::HashMap<Key, (Usage, Option<f64>)> =
+        std::collections::HashMap::new();
+    for day in agg.daily_by_key.range(from..=to).map(|(_, day)| day) {
+        for (key, (usage, cost)) in day {
+            let slot = totals
+                .entry(key.clone())
+                .or_insert_with(|| (Usage::default(), cost.map(|_| 0.0)));
+            slot.0.add(usage);
+            if let (Some(cost), Some(total)) = (cost, slot.1.as_mut()) {
+                *total += cost;
+            }
+        }
+    }
+    model_rows_json(&totals)
+}
+
+fn model_rows_json(
+    totals: &std::collections::HashMap<Key, (Usage, Option<f64>)>,
+) -> Vec<serde_json::Value> {
+    let mut rows: Vec<_> = totals
+        .iter()
+        .map(|(key, (usage, cost))| {
+            serde_json::json!({
+                "source": key.source.label(),
+                "model": key.model,
+                "speed": key.speed,
+                "input_tokens": usage.input,
+                "cache_read_tokens": usage.cache_read,
+                "cache_write_tokens": usage.cache_w5m + usage.cache_w1h,
+                "output_tokens": usage.output,
+                "reasoning_tokens": usage.reasoning,
+                "total_tokens": usage.total(),
+                "cost_usd": cost,
+            })
+        })
+        .collect();
+    rows.sort_by(|a, b| {
+        let ac = a["cost_usd"].as_f64().unwrap_or(-1.0);
+        let bc = b["cost_usd"].as_f64().unwrap_or(-1.0);
+        bc.partial_cmp(&ac)
+            .unwrap()
+            .then_with(|| a["source"].as_str().cmp(&b["source"].as_str()))
+            .then_with(|| a["model"].as_str().cmp(&b["model"].as_str()))
+            .then_with(|| a["speed"].as_str().cmp(&b["speed"].as_str()))
+    });
+    rows
 }
 
 pub fn print_json(agg: &Agg, period: &str, today: NaiveDate, utc: bool) {
@@ -292,5 +323,43 @@ mod tests {
         let v = json_value(&agg, "all", date, true);
         assert_eq!(v["by_model"][0]["model"], "expensive");
         assert_eq!(v["by_model"][1]["model"], "cheap");
+    }
+
+    #[test]
+    fn all_period_json_includes_model_rows_for_each_app_window() {
+        use crate::agg::{Entry, Usage};
+        use crate::pricing::Price;
+
+        let mut agg = Agg::default();
+        let price = Price {
+            input: 1.0,
+            output: 1.0,
+            cache_read: 1.0,
+            cache_w5m: 1.0,
+            cache_w1h: 1.0,
+        };
+        for (date, input) in [("2026-07-01", 1), ("2026-07-13", 2), ("2026-07-15", 4)] {
+            agg.add_entry(
+                &Entry {
+                    date: date.parse().unwrap(),
+                    hour: 0,
+                    source: Source::Codex,
+                    model: "gpt-test".into(),
+                    speed: "high".into(),
+                    usage: Usage {
+                        input,
+                        ..Default::default()
+                    },
+                },
+                Some(price),
+            );
+        }
+
+        let today: NaiveDate = "2026-07-15".parse().unwrap();
+        let v = json_value(&agg, "all", today, true);
+
+        assert_eq!(v["models_by_period"]["today"][0]["cost_usd"], 4.0);
+        assert_eq!(v["models_by_period"]["week"][0]["cost_usd"], 6.0);
+        assert_eq!(v["models_by_period"]["month"][0]["cost_usd"], 7.0);
     }
 }

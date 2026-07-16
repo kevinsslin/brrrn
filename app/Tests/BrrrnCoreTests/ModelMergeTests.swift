@@ -66,4 +66,18 @@ final class ModelMergeTests: XCTestCase {
         XCTAssertEqual(merged[0].fastCostUSD, 0)
         XCTAssertEqual(merged[0].fastTotalTokens, 15)
     }
+
+    func testFoldKeyDoesNotMergeDistinctModelAndVariantComponents() {
+        let rows = [
+            BurnReport.ModelUsage(source: "codex", model: "custom|xhigh", speed: "medium",
+                                  inputTokens: 10, totalTokens: 10, costUSD: 1),
+            BurnReport.ModelUsage(source: "codex", model: "custom", speed: "xhigh|medium",
+                                  outputTokens: 20, totalTokens: 20, costUSD: 2),
+        ]
+
+        let merged = ModelMerge.foldFastMode(rows)
+
+        XCTAssertEqual(merged.count, 2)
+        XCTAssertEqual(merged.map(\.costUSD), [1, 2])
+    }
 }

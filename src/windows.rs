@@ -4,6 +4,7 @@ use std::collections::BTreeMap;
 /// Streak: consecutive UTC days with burn at or above this floor. $10 punishes
 /// normal light days; $5 means "actually used it today". Mirrored in the hub.
 pub const STREAK_THRESHOLD_USD: f64 = 5.0;
+const COST_PRECISION: f64 = 1_000_000.0;
 
 /// ISO week: Monday 00:00 of the week containing `d`.
 pub fn week_start(d: NaiveDate) -> NaiveDate {
@@ -18,7 +19,12 @@ pub fn month_start(d: NaiveDate) -> NaiveDate {
 /// An incomplete today below the threshold does not break the streak (the
 /// day is not over); it just doesn't count yet.
 pub fn streak_days(daily_cost: &BTreeMap<NaiveDate, f64>, today: NaiveDate, threshold: f64) -> u32 {
-    let at = |d: NaiveDate| daily_cost.get(&d).copied().unwrap_or(0.0) >= threshold;
+    // Hub submissions are normalized to microdollars. Match that precision
+    // here so binary accumulation cannot move an exact threshold day below it.
+    let at = |d: NaiveDate| {
+        let cost = daily_cost.get(&d).copied().unwrap_or(0.0);
+        (cost * COST_PRECISION).round() / COST_PRECISION >= threshold
+    };
     let mut d = if at(today) {
         today
     } else {
@@ -80,6 +86,16 @@ mod tests {
         m.insert(d("2026-07-13"), 5.0);
         m.insert(d("2026-07-14"), 12.0);
         assert_eq!(streak_days(&m, d("2026-07-14"), 5.0), 3);
+    }
+
+    #[test]
+    fn streak_threshold_uses_stable_monetary_precision() {
+        let mathematically_five = (0..50).map(|_| 0.1_f64).sum::<f64>();
+        assert!(mathematically_five < 5.0); // binary accumulation drift
+        let mut m = BTreeMap::new();
+        m.insert(d("2026-07-14"), mathematically_five);
+
+        assert_eq!(streak_days(&m, d("2026-07-14"), 5.0), 1);
     }
 
     #[test]
