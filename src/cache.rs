@@ -7,7 +7,7 @@ use serde::{Deserialize, Serialize};
 
 use crate::agg::{Entry, Source, Usage};
 
-const CACHE_VERSION: u32 = 6;
+const CACHE_VERSION: u32 = 7;
 
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub struct Fingerprint {

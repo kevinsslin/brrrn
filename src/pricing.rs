@@ -14,6 +14,13 @@ pub struct Price {
     pub cache_w1h: f64,
 }
 
+#[derive(Clone, Copy, Debug)]
+struct ModelPrice {
+    standard: Price,
+    priority: Price,
+    flex: Price,
+}
+
 impl Price {
     pub fn cost(&self, u: &Usage) -> f64 {
         u.input as f64 * self.input
@@ -25,8 +32,8 @@ impl Price {
 }
 
 pub struct Pricing {
-    map: HashMap<String, Price>,
-    resolved: RefCell<HashMap<String, Option<Price>>>,
+    map: HashMap<String, ModelPrice>,
+    resolved: RefCell<HashMap<String, Option<ModelPrice>>>,
 }
 
 impl Pricing {
@@ -61,14 +68,43 @@ impl Pricing {
                 .get("cache_creation_input_token_cost_above_1hr")
                 .and_then(|x| x.as_f64())
                 .unwrap_or(input * 2.0);
+            let standard = Price {
+                input,
+                output,
+                cache_read,
+                cache_w5m,
+                cache_w1h,
+            };
+            let tier_price = |suffix: &str| Price {
+                input: v
+                    .get(format!("input_cost_per_token_{suffix}"))
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(standard.input),
+                output: v
+                    .get(format!("output_cost_per_token_{suffix}"))
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(standard.output),
+                cache_read: v
+                    .get(format!("cache_read_input_token_cost_{suffix}"))
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(standard.cache_read),
+                cache_w5m: v
+                    .get(format!("cache_creation_input_token_cost_{suffix}"))
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(standard.cache_w5m),
+                cache_w1h: v
+                    .get(format!(
+                        "cache_creation_input_token_cost_above_1hr_{suffix}"
+                    ))
+                    .and_then(|x| x.as_f64())
+                    .unwrap_or(standard.cache_w1h),
+            };
             map.insert(
                 name.clone(),
-                Price {
-                    input,
-                    output,
-                    cache_read,
-                    cache_w5m,
-                    cache_w1h,
+                ModelPrice {
+                    standard,
+                    priority: tier_price("priority"),
+                    flex: tier_price("flex"),
                 },
             );
         }
@@ -80,6 +116,22 @@ impl Pricing {
 
     /// Resolve a model name as logged by the CLI to a price entry.
     pub fn resolve(&self, model: &str) -> Option<Price> {
+        self.resolve_model(model).map(|p| p.standard)
+    }
+
+    /// Resolve the service-tier-specific rates encoded in a Codex variant.
+    pub fn resolve_for_speed(&self, model: &str, speed: &str) -> Option<Price> {
+        let prices = self.resolve_model(model)?;
+        if speed.split_whitespace().any(|part| part == "priority") {
+            Some(prices.priority)
+        } else if speed.split_whitespace().any(|part| part == "flex") {
+            Some(prices.flex)
+        } else {
+            Some(prices.standard)
+        }
+    }
+
+    fn resolve_model(&self, model: &str) -> Option<ModelPrice> {
         if let Some(hit) = self.resolved.borrow().get(model) {
             return *hit;
         }

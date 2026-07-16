@@ -180,9 +180,10 @@ Known pricing gaps:
 - Models with no public LiteLLM price show `n/a` cost.
 - Claude fast rows remain separate, but use standard pricing until a distinct
   public fast-mode price is available.
-- Fast mode (Claude fast, Codex priority tier) folds into its model row;
-  the hover detail shows the fast/standard split. Priced at standard rates
-  until distinct tier pricing is published.
+- Codex priority and flex variants use LiteLLM's tier-specific rates when
+  present, with standard rates as the fallback.
+- Fast mode folds into its model row; the hover detail shows the
+  fast/standard split.
 
 ## Timezone model
 
