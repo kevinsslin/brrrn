@@ -4,6 +4,39 @@ All notable changes to brrrn are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.3] - 2026-07-18
+
+Hub-only release. It deploys to the Cloudflare Worker and needs no app or
+engine update. It removes the main source of Workers KV load: the pit board
+no longer reads a member's whole history on every request.
+
+### Changed
+
+- The pit board is served from a per-member, per-machine summary kept in the
+  Coordinator's Durable Object storage instead of scanning every stored
+  machine-day on each request. A board read no longer grows with a member's
+  history, which is what drove KV reads far above what actual usage suggested.
+  Board requests now route through the Coordinator so they can read that
+  storage.
+- Submit keeps the summary in step with the day records: cost per UTC day
+  (for the today, week, and month windows and for streaks) and the current
+  week's model breakdown, tracked per machine. Cost is set per machine and
+  date, so a re-submit overwrites its own value instead of double-counting.
+  The summary lives in strongly consistent storage, so a KV write limit can
+  never leave it stale.
+
+### Added
+
+- Submit rejects records dated after the current UTC day, matching the v2
+  routes.
+
+### Notes
+
+- Summaries build lazily. The first submit from each member after this deploy
+  rebuilds them from that member's existing day records; until then the board
+  falls back to the old scan for that member. No data migration or backfill
+  is required, and the board response is unchanged.
+
 ## [0.1.2] - 2026-07-17
 
 Cost-accounting audit release. The pricing and token math was audited end
@@ -113,6 +146,7 @@ First public release. 🔥
   until public tier pricing exists.
 - Models without a public LiteLLM price show `n/a` cost.
 
+[0.1.3]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.3
 [0.1.2]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.2
 [0.1.1]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.1
 [0.1.0]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.0
