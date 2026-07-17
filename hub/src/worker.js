@@ -565,6 +565,25 @@ function applyDaysToMachineSummary(machine, days, now) {
   return machine;
 }
 
+// Fold one machine's stored day records into a machine summary. Used to
+// rebuild a machine the whole-member migration could not see yet (see below).
+async function buildMachineSummaryFromRecords(env, code, handle, machineID, now) {
+  const weekStart = isoWeekStart(now);
+  const today = utcDay(now);
+  const prefix = `day:${code}:${handle}:${machineID}:`;
+  const keys = await listKeys(env.BRRRN_KV, prefix);
+  const values = await kvJsonValues(env.BRRRN_KV, keys);
+  const machine = emptyMachineSummary(weekStart);
+  for (const key of keys) {
+    const rec = values.get(key);
+    if (!rec) continue;
+    const date = key.slice(prefix.length);
+    machine.cost[date] = rec.c ?? 0;
+    if (date >= weekStart && date <= today) machine.models[date] = rec.models ?? {};
+  }
+  return machine;
+}
+
 // Rebuild every machine summary for a member from their stored day records.
 // Runs once, on the first submit after summaries shipped, so the board never
 // undercounts a machine that will not submit again. `day:${code}:${handle}:`
@@ -600,8 +619,12 @@ async function maintainBoardSummary(env, storage, code, handle, machineID, days,
   const migratedKey = boardMigratedKey(code, handle);
   if (await storage.get(migratedKey)) {
     const key = boardMachineKey(code, handle, machineID);
+    // A missing summary under a set marker means either a brand-new machine or
+    // one whose records the whole-member migration could not see yet (KV list
+    // lag). Rebuild it from its own, by-now converged, day records so its
+    // history self-heals on this submit instead of being lost permanently.
     const machine = applyDaysToMachineSummary(
-      (await storage.get(key)) ?? emptyMachineSummary(isoWeekStart(now)),
+      (await storage.get(key)) ?? await buildMachineSummaryFromRecords(env, code, handle, machineID, now),
       days,
       now,
     );

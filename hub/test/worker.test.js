@@ -2244,6 +2244,36 @@ test('first submit migrates the whole member, capturing machines that never re-s
   );
 });
 
+test('a machine missed by whole-member migration self-heals from its own records', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'self heal');
+  await join(env, code, 'alice', 's');
+  // Laptop submits, migrating the member (marker + laptop summary written).
+  await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [sampleDay({ cost_usd: 6, claude_usd: 6 })],
+  });
+  // The desktop had older history that the migration did not capture (stand-in
+  // for KV list() lag at migration time): a day record exists with no summary.
+  seedDayRecord(env, code, 'alice', 'desktop', '2026-01-05', { c: 8 });
+
+  // The desktop's next normal submit (today only) must rebuild its full
+  // history from its own day records, not start from an empty summary.
+  await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'desktop',
+    days: [sampleDay({ date: '2026-01-07', cost_usd: 2, claude_usd: 2 })],
+  });
+
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  const alice = board.data.members[0];
+  assert.equal(alice.today_usd, 8); // laptop 6 + desktop 2
+  assert.equal(alice.week_usd, 16); // + recovered desktop 2026-01-05 (8)
+});
+
 test('summary retains full cost history for long streaks without scanning', async () => {
   const env = makeEnv();
   const code = await createPit(env, 'deep streak');
