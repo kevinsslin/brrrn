@@ -1,6 +1,6 @@
 [package]
 name = "brrrn"
-version = "0.1.3"
+version = "0.1.4"
 edition = "2021"
 description = "Local token burn + cost report for Claude Code and Codex"
 license = "MIT"

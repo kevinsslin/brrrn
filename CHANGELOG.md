@@ -4,6 +4,26 @@ All notable changes to brrrn are documented here. The format follows
 [Keep a Changelog](https://keepachangelog.com/en/1.1.0/) and versions follow
 [Semantic Versioning](https://semver.org/).
 
+## [0.1.4] - 2026-07-18
+
+Cuts how often the menu bar app talks to the hub, so a group stays well under
+Cloudflare's free-tier KV limits and a struggling hub is not hammered. Pairs
+with the 0.1.3 hub change; there is nothing to migrate.
+
+### Changed
+
+- The app no longer submits on a fixed timer. A background refresh pushes to
+  the hub only when today's or yesterday's numbers actually changed, and at
+  most once every 10 minutes, so an idle machine makes no hub writes.
+- Boards are fetched only when you open the Pits tab (or create, join, rename,
+  or hit refresh), not every few minutes in the background. The menu bar's own
+  number is local and updates as before.
+- After a hub failure the app backs off (2 minutes, doubling up to 30) instead
+  of retrying every minute, so an outage or a hit rate limit no longer becomes
+  a request storm.
+
+All of this state is kept in memory; nothing new is written to disk.
+
 ## [0.1.3] - 2026-07-18
 
 Hub-only release. It deploys to the Cloudflare Worker and needs no app or
@@ -146,6 +166,7 @@ First public release. 🔥
   until public tier pricing exists.
 - Models without a public LiteLLM price show `n/a` cost.
 
+[0.1.4]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.4
 [0.1.3]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.3
 [0.1.2]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.2
 [0.1.1]: https://github.com/kevinsslin/brrrn/releases/tag/v0.1.1
