@@ -446,7 +446,7 @@ async function authenticateMember(env, code, handleValue, secret) {
   return { handle, member };
 }
 
-async function submitDays(request, env, storage, code) {
+async function submitDays(request, env, storage, code, now) {
   const parsed = await readObject(request);
   if (parsed.error) return error(parsed.error, parsed.status);
   const body = parsed.value;
@@ -459,6 +459,10 @@ async function submitDays(request, env, storage, code) {
   if (!checked.ok) return error(checked.error);
 
   const days = uniqueDays(checked.days);
+  const maxDate = utcDay(now);
+  if (days.some(({ date }) => date > maxDate)) {
+    return error(`dates cannot be in the future (after ${maxDate})`);
+  }
   if (!(await enforceLegacySubmitLimit(
     request,
     storage,
@@ -473,6 +477,11 @@ async function submitDays(request, env, storage, code) {
     const key = `day:${code}:${auth.handle}:${body.machine_id}:${date}`;
     return env.BRRRN_KV.put(key, JSON.stringify(rec));
   }));
+  // Keep the board summary in step with the day records so the board never has
+  // to scan a member's full history. The summary lives in strongly consistent
+  // Durable Object storage and legacy mutations are serialized, so this
+  // read-modify-write is race-free and cannot be dropped by KV write limits.
+  await maintainBoardSummary(env, storage, code, auth.handle, body.machine_id, days, now);
   return json({ ok: true, days_stored: days.length });
 }
 
@@ -504,6 +513,160 @@ async function dailyRecords(env, prefix) {
     const date = key.slice(key.lastIndexOf(':') + 1);
     return [{ [date]: rec }];
   });
+}
+
+// ---- maintained board summary ----
+//
+// Scanning every stored machine-day on every board read is what makes KV
+// usage explode. Instead, submit keeps a compact per-member, per-machine
+// summary in the Coordinator's Durable Object storage, and the board reads
+// those summaries. DO storage is strongly consistent, transactional, and has
+// no per-key write-rate limit, so unlike KV it is safe to use as authoritative
+// read-modify-write state. Legacy mutations are serialized by the Coordinator,
+// so each summary update is race-free. Machine ids are DO key suffixes (not
+// object keys), so an id like `__proto__` cannot corrupt anything.
+//
+// Each machine summary holds cost per UTC day (for today/week/month windows
+// and streaks) and, for the current ISO week only, the model breakdown. Cost
+// is set (never added) per machine/date, so a re-submit overwrites its own
+// contribution without ever reading a day record back. A per-member marker
+// records that the one-time migration from day records has run.
+
+const BOARD_MIGRATED_PREFIX = 'bsum:migrated:';
+const BOARD_MACHINE_PREFIX = 'bsum:machine:';
+
+function boardMigratedKey(code, handle) {
+  return `${BOARD_MIGRATED_PREFIX}${code}:${handle}`;
+}
+
+function boardMachineKey(code, handle, machineID) {
+  return `${BOARD_MACHINE_PREFIX}${code}:${handle}:${machineID}`;
+}
+
+function emptyMachineSummary(weekStart) {
+  return { cost: {}, week_start: weekStart, models: {} };
+}
+
+// Set this submission's costs and current-week models on one machine summary,
+// in place. Cost is idempotent (set, not added); on a week rollover the
+// machine's stale model rows are dropped before the newly submitted
+// current-week days are recorded.
+function applyDaysToMachineSummary(machine, days, now) {
+  const weekStart = isoWeekStart(now);
+  const today = utcDay(now);
+  if (machine.week_start !== weekStart) {
+    machine.week_start = weekStart;
+    machine.models = {};
+  }
+  for (const { date, rec } of days) {
+    machine.cost[date] = rec.c ?? 0;
+    if (date >= weekStart && date <= today) machine.models[date] = rec.models ?? {};
+  }
+  return machine;
+}
+
+// Fold one machine's stored day records into a machine summary. Used to
+// rebuild a machine the whole-member migration could not see yet (see below).
+async function buildMachineSummaryFromRecords(env, code, handle, machineID, now) {
+  const weekStart = isoWeekStart(now);
+  const today = utcDay(now);
+  const prefix = `day:${code}:${handle}:${machineID}:`;
+  const keys = await listKeys(env.BRRRN_KV, prefix);
+  const values = await kvJsonValues(env.BRRRN_KV, keys);
+  const machine = emptyMachineSummary(weekStart);
+  for (const key of keys) {
+    const rec = values.get(key);
+    if (!rec) continue;
+    const date = key.slice(prefix.length);
+    machine.cost[date] = rec.c ?? 0;
+    if (date >= weekStart && date <= today) machine.models[date] = rec.models ?? {};
+  }
+  return machine;
+}
+
+// Rebuild every machine summary for a member from their stored day records.
+// Runs once, on the first submit after summaries shipped, so the board never
+// undercounts a machine that will not submit again. `day:${code}:${handle}:`
+// keys are `...:<machine>:<date>` and neither segment contains ':'. Uses a Map
+// so an untrusted machine id can never collide with Object prototype members.
+async function buildMachineSummariesFromRecords(env, code, handle, now) {
+  const weekStart = isoWeekStart(now);
+  const today = utcDay(now);
+  const prefix = `day:${code}:${handle}:`;
+  const keys = await listKeys(env.BRRRN_KV, prefix);
+  const values = await kvJsonValues(env.BRRRN_KV, keys);
+  const machines = new Map();
+  for (const key of keys) {
+    const rec = values.get(key);
+    if (!rec) continue;
+    const rest = key.slice(prefix.length);
+    const split = rest.lastIndexOf(':');
+    if (split < 0) continue;
+    const machineID = rest.slice(0, split);
+    const date = rest.slice(split + 1);
+    let machine = machines.get(machineID);
+    if (!machine) {
+      machine = emptyMachineSummary(weekStart);
+      machines.set(machineID, machine);
+    }
+    machine.cost[date] = rec.c ?? 0;
+    if (date >= weekStart && date <= today) machine.models[date] = rec.models ?? {};
+  }
+  return machines;
+}
+
+async function maintainBoardSummary(env, storage, code, handle, machineID, days, now) {
+  const migratedKey = boardMigratedKey(code, handle);
+  if (await storage.get(migratedKey)) {
+    const key = boardMachineKey(code, handle, machineID);
+    // A missing summary under a set marker means either a brand-new machine or
+    // one whose records the whole-member migration could not see yet (KV list
+    // lag). Rebuild it from its own, by-now converged, day records so its
+    // history self-heals on this submit instead of being lost permanently.
+    const machine = applyDaysToMachineSummary(
+      (await storage.get(key)) ?? await buildMachineSummaryFromRecords(env, code, handle, machineID, now),
+      days,
+      now,
+    );
+    await storage.put(key, machine);
+    return;
+  }
+  // First submit for this member since summaries shipped: rebuild every machine
+  // from day records, apply this submission, then commit atomically so a
+  // partial migration can never set the "migrated" marker.
+  const machines = await buildMachineSummariesFromRecords(env, code, handle, now);
+  let current = machines.get(machineID);
+  if (!current) {
+    current = emptyMachineSummary(isoWeekStart(now));
+    machines.set(machineID, current);
+  }
+  applyDaysToMachineSummary(current, days, now);
+  await storage.transaction(async (txn) => {
+    for (const [id, machine] of machines) {
+      await txn.put(boardMachineKey(code, handle, id), machine);
+    }
+    await txn.put(migratedKey, 1);
+  });
+}
+
+// Turn one machine summary into the day-record map aggregateMember expects:
+// cost per date plus the current week's model breakdown. Feeding these to the
+// same aggregator reproduces exactly what a full day-record scan produced.
+function machineSummaryToRecords(machine, now) {
+  const weekStart = isoWeekStart(now);
+  const today = utcDay(now);
+  const byDate = {};
+  for (const [date, cost] of Object.entries(machine.cost ?? {})) {
+    byDate[date] = { c: cost, models: {} };
+  }
+  if (machine.week_start === weekStart) {
+    for (const [date, models] of Object.entries(machine.models ?? {})) {
+      if (date >= weekStart && date <= today) {
+        (byDate[date] ??= { c: 0, models: {} }).models = models;
+      }
+    }
+  }
+  return byDate;
 }
 
 function logicalRecordKey(recordKey) {
@@ -1213,24 +1376,48 @@ async function getRelationshipMemberV2(request, env, storage, id, handleValue) {
   });
 }
 
-async function getBoard(env, code, now) {
+async function getBoard(env, storage, code, now) {
   const pit = await pitExists(env.BRRRN_KV, code);
   if (!pit) return error('pit not found', 404, true);
-  const memberKeys = await listKeys(env.BRRRN_KV, `member:${code}:`);
   const memberPrefix = `member:${code}:`;
+  const memberKeys = await listKeys(env.BRRRN_KV, memberPrefix);
   const handles = memberKeys.map((key) => key.slice(memberPrefix.length));
-  const [memberValues, recordsByMember] = await Promise.all([
+  const machinePrefix = `${BOARD_MACHINE_PREFIX}${code}:`;
+  const [memberValues, migratedMarkers, machineSummaries] = await Promise.all([
     kvJsonValues(env.BRRRN_KV, memberKeys),
-    Promise.all(handles.map((handle) => dailyRecords(env, `day:${code}:${handle}:`))),
+    storage.list({ prefix: `${BOARD_MIGRATED_PREFIX}${code}:` }),
+    storage.list({ prefix: machinePrefix }),
   ]);
-  const members = memberKeys.map((key, index) => {
-    const handle = handles[index];
-    return {
-      handle,
-      display_name: memberValues.get(key)?.display_name ?? null,
-      ...aggregateMember(recordsByMember[index], now),
-    };
-  });
+  const summariesByHandle = new Map();
+  for (const [key, machine] of machineSummaries) {
+    const rest = key.slice(machinePrefix.length);
+    const split = rest.indexOf(':');
+    if (split < 0) continue;
+    const handle = rest.slice(0, split);
+    let list = summariesByHandle.get(handle);
+    if (!list) {
+      list = [];
+      summariesByHandle.set(handle, list);
+    }
+    list.push(machine);
+  }
+  // Migrated members (the steady state) resolve from Durable Object summaries
+  // with no day-record reads. A member who has not submitted since summaries
+  // shipped has no marker yet, so fall back to a one-off full scan until their
+  // next submit migrates them; this keeps the board correct during the rollout.
+  const recordsByMember = await Promise.all(handles.map((handle) => {
+    if (migratedMarkers.has(boardMigratedKey(code, handle))) {
+      return (summariesByHandle.get(handle) ?? []).map((machine) => (
+        machineSummaryToRecords(machine, now)
+      ));
+    }
+    return dailyRecords(env, `day:${code}:${handle}:`);
+  }));
+  const members = memberKeys.map((key, index) => ({
+    handle: handles[index],
+    display_name: memberValues.get(key)?.display_name ?? null,
+    ...aggregateMember(recordsByMember[index], now),
+  }));
   members.sort((a, b) => b.today_usd - a.today_usd || a.handle.localeCompare(b.handle));
   return json({ name: pit.name ?? null, code, streak_threshold_usd: STREAK_THRESHOLD_USD, members }, 200, true);
 }
@@ -1318,12 +1505,19 @@ async function coordinatedRoute(request, env, storage) {
 
   match = path.match(/^\/pit\/([^/]+)\/submit$/);
   if (request.method === 'POST' && match) {
-    return submitDays(request, env, storage, match[1]);
+    return submitDays(request, env, storage, match[1], now);
   }
 
   match = path.match(/^\/pit\/([^/]+)\/rename$/);
   if (request.method === 'POST' && match) {
     return renamePit(request, env, storage, match[1]);
+  }
+
+  // The board reads per-member summaries from Durable Object storage, so it is
+  // served here (with storage) rather than straight from the Worker.
+  match = path.match(/^\/pit\/([^/]+)\/board$/);
+  if (request.method === 'GET' && match) {
+    return getBoard(env, storage, match[1], now);
   }
 
   return error('not found', 404);
@@ -1365,6 +1559,7 @@ export class Coordinator {
     this.activeBodyReadsByIP = new Map();
     this.activeBoardReads = 0;
     this.activeMemberReads = 0;
+    this.activeLegacyBoardReads = 0;
   }
 
   async admitV2(request) {
@@ -1492,6 +1687,17 @@ export class Coordinator {
           this.activeMemberReads -= 1;
         }
       }
+      if (/^\/pit\/[^/]+\/board$/.test(path)) {
+        if (this.activeLegacyBoardReads >= MAX_CONCURRENT_BOARD_READS) {
+          return error('service busy', 503, true);
+        }
+        this.activeLegacyBoardReads += 1;
+        try {
+          return await coordinatedRoute(request, this.env, this.storage);
+        } finally {
+          this.activeLegacyBoardReads -= 1;
+        }
+      }
       return coordinatedRoute(request, this.env, this.storage);
     }
 
@@ -1566,7 +1772,7 @@ async function route(request, env) {
   }
 
   match = path.match(/^\/pit\/([^/]+)\/board$/);
-  if (request.method === 'GET' && match) return getBoard(env, match[1], now);
+  if (request.method === 'GET' && match) return coordinatedFetch(request, env);
 
   match = path.match(/^\/pit\/([^/]+)\/member\/([^/]+)$/);
   if (request.method === 'GET' && match) {

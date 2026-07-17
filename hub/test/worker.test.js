@@ -2142,9 +2142,9 @@ test('board sorts members by today_usd desc', async () => {
   assert.deepEqual(board.data.members.map((m) => m.handle), ['high', 'mid', 'low']);
 });
 
-test('legacy board starts day reads while member metadata is loading', async () => {
+test('legacy board serves migrated members from summaries without scanning day history', async () => {
   const env = makeEnv();
-  const code = await createPit(env, 'concurrent reads');
+  const code = await createPit(env, 'summary reads');
   for (const handle of ['alice', 'bob', 'carol']) {
     await join(env, code, handle, 's');
     await call(env, 'POST', `/pit/${code}/submit`, {
@@ -2156,17 +2156,221 @@ test('legacy board starts day reads while member metadata is loading', async () 
   }
 
   env.BRRRN_KV.listPrefixes = [];
-  const releaseMemberRead = env.BRRRN_KV.blockNextBulkGets(1);
-  const boardPromise = call(env, 'GET', `/pit/${code}/board`);
-  await new Promise((resolve) => setTimeout(resolve, 0));
+  env.BRRRN_KV.bulkGetKeys = [];
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.status, 200);
+  assert.equal(board.data.members.length, 3);
+  assert.deepEqual(board.data.members.map((m) => m.today_usd), [6, 6, 6]);
 
+  // The whole point of the summary: a board read touches member metadata and
+  // the Durable Object summaries, never a member's day-record history in KV.
+  assert.equal(
+    env.BRRRN_KV.listPrefixes.some((prefix) => prefix.startsWith(`day:${code}:`)),
+    false,
+  );
+  assert.equal(
+    env.BRRRN_KV.bulkGetKeys.some((key) => key.startsWith(`day:${code}:`)),
+    false,
+  );
+  // Summaries and the migrated markers live in Durable Object storage, not KV.
+  const summaryKeys = [...env.__TEST_DO_STORAGE.store.keys()];
+  assert.ok(summaryKeys.includes(`bsum:migrated:${code}:alice`));
+  assert.ok(summaryKeys.includes(`bsum:machine:${code}:alice:laptop`));
+});
+
+function seedDayRecord(env, code, handle, machine, date, rec) {
+  env.BRRRN_KV.store.set(
+    `day:${code}:${handle}:${machine}:${date}`,
+    JSON.stringify({ t: 0, cc: 0, cx: 0, models: {}, ...rec }),
+  );
+}
+
+test('legacy board falls back to a full scan for members without a summary yet', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'pre-summary data');
+  await join(env, code, 'alice', 's');
+  // Simulate history written before summaries shipped: day records exist but
+  // no summary. The board must still be correct via the one-off scan.
+  seedDayRecord(env, code, 'alice', 'laptop', '2026-01-06', { c: 6 });
+  seedDayRecord(env, code, 'alice', 'laptop', '2026-01-07', { c: 10 });
+
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.status, 200);
+  assert.equal(board.data.members[0].today_usd, 10);
+  assert.equal(board.data.members[0].week_usd, 16);
+  // No summary yet, so the fallback scan does read day history.
   assert.equal(
     env.BRRRN_KV.listPrefixes.some((prefix) => prefix.startsWith(`day:${code}:`)),
     true,
   );
-  releaseMemberRead();
-  const board = await boardPromise;
-  assert.equal(board.status, 200);
+});
+
+test('first submit migrates the whole member, capturing machines that never re-submit', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'multi-machine migration');
+  await join(env, code, 'alice', 's');
+  // Two machines' worth of pre-summary history.
+  seedDayRecord(env, code, 'alice', 'laptop', '2026-01-06', { c: 6 });
+  seedDayRecord(env, code, 'alice', 'laptop', '2026-01-07', {
+    c: 10,
+    models: { 'claude-fable-5': { i: 80, o: 20, c: 10 } },
+  });
+  seedDayRecord(env, code, 'alice', 'desktop', '2026-01-07', { c: 4 });
+
+  // Only the laptop re-submits (re-stating a value it already had). The whole
+  // member is migrated, so the desktop's untouched history is preserved.
+  const submitted = await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [{ date: '2026-01-07', tokens: 80, cost_usd: 10, claude_usd: 10, codex_usd: 0,
+      models: { 'claude-fable-5': { input_tokens: 80, output_tokens: 20, cost_usd: 10 } } }],
+  });
+  assert.equal(submitted.status, 200);
+
+  env.BRRRN_KV.listPrefixes = [];
+  env.BRRRN_KV.bulkGetKeys = [];
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.members[0].today_usd, 14);
+  assert.equal(board.data.members[0].week_usd, 20);
+  // Now migrated: no day-record reads on the board.
+  assert.equal(
+    env.BRRRN_KV.listPrefixes.some((prefix) => prefix.startsWith(`day:${code}:`)),
+    false,
+  );
+  assert.equal(
+    env.BRRRN_KV.bulkGetKeys.some((key) => key.startsWith(`day:${code}:`)),
+    false,
+  );
+});
+
+test('a machine missed by whole-member migration self-heals from its own records', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'self heal');
+  await join(env, code, 'alice', 's');
+  // Laptop submits, migrating the member (marker + laptop summary written).
+  await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [sampleDay({ cost_usd: 6, claude_usd: 6 })],
+  });
+  // The desktop had older history that the migration did not capture (stand-in
+  // for KV list() lag at migration time): a day record exists with no summary.
+  seedDayRecord(env, code, 'alice', 'desktop', '2026-01-05', { c: 8 });
+
+  // The desktop's next normal submit (today only) must rebuild its full
+  // history from its own day records, not start from an empty summary.
+  await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'desktop',
+    days: [sampleDay({ date: '2026-01-07', cost_usd: 2, claude_usd: 2 })],
+  });
+
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  const alice = board.data.members[0];
+  assert.equal(alice.today_usd, 8); // laptop 6 + desktop 2
+  assert.equal(alice.week_usd, 16); // + recovered desktop 2026-01-05 (8)
+});
+
+test('summary retains full cost history for long streaks without scanning', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'deep streak');
+  await join(env, code, 'alice', 's');
+  // 40 consecutive UTC days ending today, each above the streak threshold.
+  const submitted = await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: daysEndingOn(40, '2026-01-07'),
+  });
+  assert.equal(submitted.status, 200);
+
+  env.BRRRN_KV.listPrefixes = [];
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.members[0].streak_days, 40);
+  assert.equal(
+    env.BRRRN_KV.listPrefixes.some((prefix) => prefix.startsWith(`day:${code}:`)),
+    false,
+  );
+});
+
+test('week rollover drops stale model rows but keeps cost history for the month', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'rollover');
+  await join(env, code, 'alice', 's');
+  await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [{ date: '2026-01-07', tokens: 100, cost_usd: 10, claude_usd: 10, codex_usd: 0,
+      models: { 'old-week-model': { input_tokens: 10, output_tokens: 1, cost_usd: 10 } } }],
+  });
+
+  // Jump to the next ISO week (Mon 2026-01-12 .. Sun 2026-01-18); now is Wed.
+  env.__TEST_NOW = '2026-01-14T12:00:00Z';
+  await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [{ date: '2026-01-14', tokens: 50, cost_usd: 5, claude_usd: 5, codex_usd: 0,
+      models: { 'new-week-model': { input_tokens: 5, output_tokens: 1, cost_usd: 5 } } }],
+  });
+
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  const alice = board.data.members[0];
+  assert.equal(alice.today_usd, 5);
+  assert.equal(alice.week_usd, 5);
+  assert.equal(alice.month_usd, 15);
+  assert.equal(alice.top_model, 'new-week-model');
+  assert.deepEqual(alice.models_week.map((m) => m.model), ['new-week-model']);
+});
+
+test('re-submitting a date overwrites its own contribution instead of double-counting', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'idempotent');
+  await join(env, code, 'alice', 's');
+  const body = {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [sampleDay()],
+  };
+  await call(env, 'POST', `/pit/${code}/submit`, body);
+  // The same payload twice must not double the day's cost.
+  await call(env, 'POST', `/pit/${code}/submit`, body);
+  let board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.members[0].today_usd, 6);
+
+  // A changed value replaces the previous one.
+  await call(env, 'POST', `/pit/${code}/submit`, {
+    ...body,
+    days: [sampleDay({ cost_usd: 9, claude_usd: 9 })],
+  });
+  board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.members[0].today_usd, 9);
+});
+
+test('legacy submit rejects future-dated records', async () => {
+  const env = makeEnv();
+  const code = await createPit(env, 'no future');
+  await join(env, code, 'alice', 's');
+  const future = await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [sampleDay({ date: '2026-01-08' })],
+  });
+  assert.equal(future.status, 400);
+  // Today is still accepted.
+  const ok = await call(env, 'POST', `/pit/${code}/submit`, {
+    handle: 'alice',
+    secret: 's',
+    machine_id: 'laptop',
+    days: [sampleDay()],
+  });
+  assert.equal(ok.status, 200);
 });
 
 test('any member can retitle a pit; outsiders and impostors cannot', async () => {
@@ -2305,6 +2509,11 @@ test('concurrent submissions for different dates do not overwrite each other', a
     { date: '2026-01-06', tokens: 10, cost_usd: 6 },
     { date: '2026-01-07', tokens: 20, cost_usd: 7 },
   ]);
+  // The board summary is a read-modify-write on one KV object; the Coordinator
+  // serializes legacy mutations, so neither concurrent date is lost from it.
+  const board = await call(env, 'GET', `/pit/${code}/board`);
+  assert.equal(board.data.members[0].today_usd, 7);
+  assert.equal(board.data.members[0].week_usd, 13);
 });
 
 test('submit: wrong secret is 401, unknown pit and member are 404', async () => {
