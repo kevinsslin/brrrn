@@ -39,6 +39,10 @@ final class AppModel: ObservableObject {
     private var debounceTask: Task<Void, Never>?
     private var refreshLoop: Task<Void, Never>?
     @Published private(set) var lastPitRefresh: Date?
+    private var pitSync = PitSyncState()
+    /// A forced pit refresh requested while one was already running, run once
+    /// the current pass finishes so the request is coalesced, not dropped.
+    private var pendingForcedPit = false
     private var started = false
 
     var menuBarTitle: String? {
@@ -115,8 +119,20 @@ final class AppModel: ObservableObject {
         }
     }
 
+    /// A forced refresh (`forcePit: true`) is what happens when the user is
+    /// actually looking (opening the Pits tab, creating/joining/renaming, or
+    /// hitting refresh): it pushes a submit and pulls every board, ignoring the
+    /// submit interval and the failure backoff. A background tick leaves the
+    /// hub alone unless there is something new to push.
+    ///
+    /// A forced refresh that arrives while another refresh is running is not
+    /// dropped: it is remembered and run once the current pass finishes, so the
+    /// user never opens the Pits tab and gets a silently stale board.
     func refresh(forcePit: Bool = false) async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            if forcePit { pendingForcedPit = true }
+            return
+        }
         guard let binary = BinaryLocator().locate() else {
             errorMessage = EngineError.binaryNotFound.localizedDescription
             return
@@ -124,6 +140,16 @@ final class AppModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
 
+        var forced = forcePit
+        repeat {
+            pendingForcedPit = false
+            await scanLocal(binary: binary)
+            await syncPits(binary: binary, forcePit: forced)
+            forced = pendingForcedPit
+        } while forced
+    }
+
+    private func scanLocal(binary: String) async {
         do {
             let reports = try await LocalEngine.refreshReports(binary: binary)
             report = reports.all
@@ -135,14 +161,24 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
-
-        let pitIsDue = forcePit || lastPitRefresh.map { Date().timeIntervalSince($0) >= 300 } ?? true
-        if pitIsDue {
-            await refreshBoards(binary: binary)
-        }
     }
 
-    private func refreshBoards(binary: String) async {
+    /// Talks to the hub as little as possible. A background sync only pushes a
+    /// submit when today's or yesterday's numbers actually changed, and never
+    /// more than once every `submitMinInterval`; it does not pull boards,
+    /// because the menu bar shows only local numbers and nobody is looking at
+    /// the leaderboard. Boards are fetched only on a forced sync. Failures open
+    /// a widening backoff window so a broken or rate-limited hub is not retried
+    /// every minute.
+    private func syncPits(binary: String, forcePit: Bool) async {
+        let now = Date()
+        if !forcePit && PitSync.inBackoff(pitSync, now: now) { return }
+
+        let signature = report?.daily.map { SubmitSignature.of(daily: $0, now: now) }
+        let doSubmit = forcePit || PitSync.submitDue(pitSync, signature: signature, now: now)
+        let doBoards = forcePit
+        guard doSubmit || doBoards else { return }
+
         switch await configStore.load() {
         case .missing:
             boards = []
@@ -153,29 +189,39 @@ final class AppModel: ObservableObject {
             boards = []
         case .valid:
             do {
-                // Keep app-side config mutations queued while the Rust process
-                // reads and updates the same file, then fetch with fresh state.
-                try await configStore.serialize {
-                    try await LocalEngine.submit(binary: binary)
+                var submittedSignature: String?
+                if doSubmit {
+                    // Keep app-side config mutations queued while the Rust
+                    // process reads and updates the same file.
+                    try await configStore.serialize {
+                        try await LocalEngine.submit(binary: binary)
+                    }
+                    submittedSignature = signature
                 }
-                let refreshedConfig: BrrrnConfig
-                switch await configStore.load() {
-                case .valid(let config):
-                    refreshedConfig = config
-                case .missing:
-                    boards = []
-                    throw BrrrnConfigStoreError.fileSystem(
-                        "brrrn config disappeared during submission"
-                    )
-                case .malformed(let message):
-                    boards = []
-                    throw BrrrnConfigStoreError.malformed(message)
+                if doBoards {
+                    // Reload after the submit so the board fetch sees fresh
+                    // state (backfill markers, adopted hub URL).
+                    boards = try await pitClient.boards(config: try await freshConfig())
+                    lastPitRefresh = Date()
                 }
-                boards = try await pitClient.boards(config: refreshedConfig)
-                lastPitRefresh = Date()
+                PitSync.recordSuccess(&pitSync, submittedSignature: submittedSignature, now: Date())
             } catch {
                 errorMessage = error.localizedDescription
+                PitSync.recordFailure(&pitSync, now: Date())
             }
+        }
+    }
+
+    private func freshConfig() async throws -> BrrrnConfig {
+        switch await configStore.load() {
+        case .valid(let config):
+            return config
+        case .missing:
+            boards = []
+            throw BrrrnConfigStoreError.fileSystem("brrrn config disappeared during submission")
+        case .malformed(let message):
+            boards = []
+            throw BrrrnConfigStoreError.malformed(message)
         }
     }
 
