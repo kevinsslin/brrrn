@@ -39,6 +39,11 @@ public enum PitSync {
     public static let backoffBase: TimeInterval = 120
     /// Backoff never grows past this.
     public static let backoffCap: TimeInterval = 1_800
+    /// Re-push the current window at least this often even when the signature
+    /// looks unchanged. The signature is built from daily totals, which cannot
+    /// see a change confined to the model breakdown or the Claude/Codex split;
+    /// this bounds how long such a change can go unsent to hours, never forever.
+    public static let maxSubmitGap: TimeInterval = 21_600
 
     /// True while a failure backoff window is open. Forced (user-initiated)
     /// syncs ignore this; only the automatic loop honors it.
@@ -47,10 +52,15 @@ public enum PitSync {
         return now < retryAfter
     }
 
-    /// Whether a background submit should run: only when the push window
-    /// actually changed and the minimum interval has elapsed.
+    /// Whether a background submit should run. Normally only when the push
+    /// window changed and the minimum interval has elapsed, but also on the
+    /// `maxSubmitGap` safety flush so a change the signature cannot see is never
+    /// stranded. `signature == nil` means there is no local data to push.
     public static func submitDue(_ state: PitSyncState, signature: String?, now: Date) -> Bool {
-        guard let signature else { return false }
+        guard signature != nil else { return false }
+        if let last = state.lastSubmitAt, now.timeIntervalSince(last) >= maxSubmitGap {
+            return true
+        }
         guard signature != state.lastSubmitSignature else { return false }
         if let last = state.lastSubmitAt, now.timeIntervalSince(last) < submitMinInterval {
             return false

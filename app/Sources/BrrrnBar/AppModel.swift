@@ -40,6 +40,9 @@ final class AppModel: ObservableObject {
     private var refreshLoop: Task<Void, Never>?
     @Published private(set) var lastPitRefresh: Date?
     private var pitSync = PitSyncState()
+    /// A forced pit refresh requested while one was already running, run once
+    /// the current pass finishes so the request is coalesced, not dropped.
+    private var pendingForcedPit = false
     private var started = false
 
     var menuBarTitle: String? {
@@ -121,8 +124,15 @@ final class AppModel: ObservableObject {
     /// hitting refresh): it pushes a submit and pulls every board, ignoring the
     /// submit interval and the failure backoff. A background tick leaves the
     /// hub alone unless there is something new to push.
+    ///
+    /// A forced refresh that arrives while another refresh is running is not
+    /// dropped: it is remembered and run once the current pass finishes, so the
+    /// user never opens the Pits tab and gets a silently stale board.
     func refresh(forcePit: Bool = false) async {
-        guard !isRefreshing else { return }
+        guard !isRefreshing else {
+            if forcePit { pendingForcedPit = true }
+            return
+        }
         guard let binary = BinaryLocator().locate() else {
             errorMessage = EngineError.binaryNotFound.localizedDescription
             return
@@ -130,6 +140,16 @@ final class AppModel: ObservableObject {
         isRefreshing = true
         defer { isRefreshing = false }
 
+        var forced = forcePit
+        repeat {
+            pendingForcedPit = false
+            await scanLocal(binary: binary)
+            await syncPits(binary: binary, forcePit: forced)
+            forced = pendingForcedPit
+        } while forced
+    }
+
+    private func scanLocal(binary: String) async {
         do {
             let reports = try await LocalEngine.refreshReports(binary: binary)
             report = reports.all
@@ -141,8 +161,6 @@ final class AppModel: ObservableObject {
         } catch {
             errorMessage = error.localizedDescription
         }
-
-        await syncPits(binary: binary, forcePit: forcePit)
     }
 
     /// Talks to the hub as little as possible. A background sync only pushes a

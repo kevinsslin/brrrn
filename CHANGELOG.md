@@ -14,7 +14,9 @@ with the 0.1.3 hub change; there is nothing to migrate.
 
 - The app no longer submits on a fixed timer. A background refresh pushes to
   the hub only when today's or yesterday's numbers actually changed, and at
-  most once every 10 minutes, so an idle machine makes no hub writes.
+  most once every 10 minutes, so an idle machine barely touches the hub (a
+  safety re-push every few hours still covers changes the daily totals cannot
+  see, such as a shift in the model breakdown).
 - Boards are fetched only when you open the Pits tab (or create, join, rename,
   or hit refresh), not every few minutes in the background. The menu bar's own
   number is local and updates as before.

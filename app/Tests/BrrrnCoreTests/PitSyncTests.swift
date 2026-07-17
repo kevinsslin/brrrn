@@ -30,6 +30,24 @@ final class PitSyncTests: XCTestCase {
         XCTAssertTrue(PitSync.submitDue(PitSyncState(), signature: "new", now: now))
     }
 
+    func testSafetyFlushResubmitsUnchangedWindowAfterMaxGap() {
+        // Nothing the signature can see has changed, but the model breakdown
+        // might have; a re-push is due once the max gap elapses.
+        let state = PitSyncState(
+            lastSubmitSignature: "sig",
+            lastSubmitAt: now.addingTimeInterval(-(PitSync.maxSubmitGap + 1))
+        )
+        XCTAssertTrue(PitSync.submitDue(state, signature: "sig", now: now))
+    }
+
+    func testNoFlushBeforeMaxGap() {
+        let state = PitSyncState(
+            lastSubmitSignature: "sig",
+            lastSubmitAt: now.addingTimeInterval(-(PitSync.maxSubmitGap - 60))
+        )
+        XCTAssertFalse(PitSync.submitDue(state, signature: "sig", now: now))
+    }
+
     func testBackoffWindowGrowsAndCaps() {
         var state = PitSyncState()
 
